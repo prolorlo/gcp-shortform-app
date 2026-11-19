@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 아이콘 전경 1단계 (행복도 표정). AppIconSwitcher 참고 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+<path android:fillColor="#FFFFFFFF" android:strokeColor="#FF17191A" android:strokeWidth="2.6" android:pathData="M30,59a24,20.5 0,1 0,48 0a24,20.5 0,1 0,-48 0z" />
+<path android:fillColor="#AA78A050" android:pathData="M39,69a1.6,1.6 0,1 0,3.2 0a1.6,1.6 0,1 0,-3.2 0zM68,66a1.3,1.3 0,1 0,2.6 0a1.3,1.3 0,1 0,-2.6 0z" />
+<path android:fillColor="#99F49880" android:pathData="M36.5,61a4,2.6 0,1 0,8 0a4,2.6 0,1 0,-8 0zM63.5,61a4,2.6 0,1 0,8 0a4,2.6 0,1 0,-8 0z" />
+<path android:strokeColor="#FF17191A" android:strokeWidth="2.6" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M41,56Q45,50.5 49,56M59,56Q63,50.5 67,56" />
+<path android:fillColor="#FFC45A5A" android:strokeColor="#FF17191A" android:strokeWidth="2.2" android:strokeLineJoin="round" android:pathData="M48.5,61.5Q54,70 59.5,61.5Z" />
+</vector>

@@ -10,5 +10,5 @@
         <item name="android:windowBackground">@color/bg</item>
     </style>
     <color name="bg">#F3F4F1</color>
-    <color name="launcher_bg">#FFE0D2</color>
+    <color name="launcher_bg">#E9EFDF</color>
 </resources>

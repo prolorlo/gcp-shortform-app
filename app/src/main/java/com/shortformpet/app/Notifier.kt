@@ -8,28 +8,31 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Build
 import java.time.LocalDate
 
 /**
- * 알림.
- *  - 누적 알림: 목표 전 30분마다, 목표를 넘긴 뒤 15분마다
- *  - 연속 시청 알림: 한 번에 20분 넘게 이어 볼 때
- *  - 세션 완료, 하루 정산
+ * 알림 (README F2).
+ *  - 누적 알림: 순수 시청 기준 목표 전 30분마다, 목표를 넘긴 뒤 15분마다
+ *  - 연속 시청 알림: 설정한 주기(1~45분)마다. 누적 알림과 겹치면 누적 알림 1건만
+ *  - 오전 일일 집중 쪽지, 세션 완료, 하루 정산, 집중 중 고정 알림
  *
- * 남은 할 일은 돌아가며 한 개씩 보여주고, 잠금 화면에는 개수만 보입니다.
- * 밤 12시~새벽 5시에는 할 일 대신 수면 권유 문구를 씁니다.
+ * 모든 알림 오른쪽에 지금 표정의 모찌 얼굴을 넣습니다.
+ * 잠금 화면에는 할 일 내용 대신 "할 일 N개 남음"만 보이고, 23:30~04:59에는 수면 권유 문구로 바뀝니다.
  */
 object Notifier {
     private const val CH_ALERT = "watch_alert"
     private const val CH_DAILY = "daily_report"
     private const val CH_STUDY = "study"
+    private const val CH_MORNING = "morning_note"
+    private const val CH_FOCUS = "focus_ongoing"
     private const val ID_ALERT = 1001
     private const val ID_DAILY = 1002
     private const val ID_CONTINUOUS = 1003
     private const val ID_STUDY = 1004
-
-    val SLEEP_LINE get() = Lines.SLEEP
+    private const val ID_FOCUS = 1005
+    private const val ID_MORNING = 1006
 
     fun createChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
@@ -48,6 +51,11 @@ object Notifier {
                 description = Lines.CHANNEL_STUDY_DESC
             },
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_MORNING, Lines.CHANNEL_MORNING, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = Lines.CHANNEL_MORNING_DESC
+            },
+        )
         // 소리·진동 없이 알림 창에만 머무는 채널
         nm.createNotificationChannel(
             NotificationChannel(CH_FOCUS, Lines.CHANNEL_FOCUS, NotificationManager.IMPORTANCE_LOW).apply {
@@ -57,8 +65,19 @@ object Notifier {
         )
     }
 
-    private const val CH_FOCUS = "focus_ongoing"
-    private const val ID_FOCUS = 1005
+    fun canNotify(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    /** 알림 오른쪽 모찌 얼굴 */
+    private fun face(context: Context, state: PetState): Bitmap? = try {
+        MochiPainter.bitmap(context, (64 * context.resources.displayMetrics.density).toInt(), state, P.PET_BG)
+    } catch (e: Exception) {
+        null
+    }
+
+    // ------------------------------------------------------------------ 집중 중 고정 알림
+
     /** 지금 띄워 둔 고정 알림의 끝나는 시각(벽시계). 0이면 없음, -1이면 아직 확인 전 */
     @Volatile private var focusShownEnd = -1L
 
@@ -86,10 +105,7 @@ object Notifier {
         focusShownEnd = endWall
 
         val todo = study.todos(now).firstOrNull { !it.done }?.text
-        val intent = Intent(context, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_STUDY)
-        val pi = PendingIntent.getActivity(context, ID_FOCUS, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pi = openApp(context, ID_FOCUS, MainActivity.TAB_TODAY)
         fun base() = Notification.Builder(context, CH_FOCUS)
             .setSmallIcon(R.drawable.ic_stat_pet)
             .setContentTitle(Lines.FOCUS_TITLE)
@@ -99,6 +115,7 @@ object Notifier {
             .setChronometerCountDown(true)
         val notification = base()
             .setContentText(Lines.focusBody(todo))
+            .setLargeIcon(face(context, PetEngine(Stores.of(context)).state()))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_STATUS)
@@ -110,9 +127,7 @@ object Notifier {
         nm.notify(ID_FOCUS, notification)
     }
 
-    fun canNotify(context: Context): Boolean =
-        Build.VERSION.SDK_INT < 33 ||
-            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    // ------------------------------------------------------------------ 시청 알림
 
     /** 알림 본문에 넣을 줄(할 일 내용 포함)과 잠금 화면용 줄(개수만) */
     private fun todoLines(study: StudyManager, petName: String): Pair<String?, String> {
@@ -135,17 +150,17 @@ object Notifier {
         val breakdown = ShortFormApp.entries
             .map { it to repo.millis(day, it) }
             .filter { it.second >= 60_000 }
-            .joinToString(" · ") { "${it.first.label} ${formatDuration(it.second)}" }
-        val goal = repo.dailyGoalMinutes
+            .joinToString(" · ") { "${it.first.short} ${formatDuration(it.second)}" }
+        val goal = repo.goalFor(day)
         val goalLine = when {
             thresholdMinutes > goal -> Lines.watchGoalOver(formatMinutes(goal), formatMinutes(thresholdMinutes - goal))
             thresholdMinutes == goal -> Lines.watchGoalReached(formatMinutes(goal))
             else -> Lines.watchGoalLeft(formatMinutes(goal - thresholdMinutes))
         }
-        val petLine = if (DayClock.isLateNight()) null else Lines.says(state.name, PetEngine.speech(state.mood, state.stage))
+        val petLine = if (DayClock.isLateNight()) null else Lines.says(state.name, Lines.idle(state.mood, state.stage))
 
         val body = listOfNotNull(breakdown, goalLine, petLine, todoLine).filter { it.isNotBlank() }.joinToString("\n")
-        notify(context, CH_ALERT, ID_ALERT, title, body, publicLine)
+        notify(context, CH_ALERT, ID_ALERT, title, body, publicLine, face(context, state))
     }
 
     /** 연속 시청 알림 */
@@ -153,10 +168,10 @@ object Notifier {
         if (!canNotify(context)) return
         createChannels(context)
         val stores = Stores.of(context)
-        val name = PetEngine(stores).name
-        val (todoLine, publicLine) = todoLines(StudyManager(stores), name)
+        val state = PetEngine(stores).state()
+        val (todoLine, publicLine) = todoLines(StudyManager(stores), state.name)
         val body = listOfNotNull(Lines.continuousBody(continuousMinutes), todoLine).joinToString("\n")
-        notify(context, CH_ALERT, ID_CONTINUOUS, Lines.says(name, Lines.CONTINUOUS_TITLE), body, publicLine)
+        notify(context, CH_ALERT, ID_CONTINUOUS, Lines.says(state.name, Lines.CONTINUOUS_TITLE), body, publicLine, face(context, state))
     }
 
     fun sessionCompleted(context: Context, event: StudyEvent.SessionCompleted) {
@@ -164,30 +179,66 @@ object Notifier {
         createChannels(context)
         val body = buildString {
             append(
-                if (event.couponMinutes > 0) Lines.sessionDoneCoupon(event.couponMinutes)
-                else Lines.SESSION_DONE_COUPON_MAX,
+                when {
+                    event.sessionMinutes <= 5 -> Lines.SESSION_DONE_WARMUP
+                    event.couponMinutes > 0 -> Lines.sessionDoneCoupon(event.couponMinutes)
+                    else -> Lines.SESSION_DONE_COUPON_MAX
+                },
             )
             if (event.shieldGranted) append(Lines.SESSION_DONE_SHIELD)
         }
-        notify(context, CH_STUDY, ID_STUDY, Lines.sessionDoneTitle(event.sessionMinutes), body, "")
+        val state = PetEngine(Stores.of(context)).state()
+        notify(context, CH_STUDY, ID_STUDY, Lines.sessionDoneTitle(event.sessionMinutes), body, "", face(context, state), MainActivity.TAB_TODAY)
     }
 
     fun dailyReport(context: Context, message: String) {
         if (!canNotify(context)) return
         createChannels(context)
-        notify(context, CH_DAILY, ID_DAILY, Lines.DAILY_TITLE, message, "")
+        val state = PetEngine(Stores.of(context)).state()
+        notify(context, CH_DAILY, ID_DAILY, Lines.DAILY_TITLE, message, "", face(context, state), MainActivity.TAB_MOCHI)
     }
 
-    private fun notify(context: Context, channel: String, id: Int, title: String, body: String, publicText: String) {
+    /** 오전 9시 집중 쪽지 */
+    fun morningNote(context: Context) {
+        if (!canNotify(context)) return
+        createChannels(context)
+        val stores = Stores.of(context)
+        val state = PetEngine(stores).state()
+        val left = StudyManager(stores).remainingTodoCount()
+        notify(
+            context, CH_MORNING, ID_MORNING,
+            Lines.morningTitle(state.name),
+            Lines.morningBody(left, formatMinutes(UsageRepository(stores).dailyGoalMinutes)),
+            if (left > 0) Lines.todosLeftPublic(left) else Lines.MORNING_PUBLIC,
+            face(context, state),
+            MainActivity.TAB_TODAY,
+        )
+    }
+
+    private fun openApp(context: Context, requestCode: Int, tab: Int?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        val pi = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        if (tab != null) intent.putExtra(MainActivity.EXTRA_TAB, tab)
+        return PendingIntent.getActivity(context, requestCode, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    private fun notify(
+        context: Context,
+        channel: String,
+        id: Int,
+        title: String,
+        body: String,
+        publicText: String,
+        largeIcon: Bitmap?,
+        tab: Int? = null,
+    ) {
+        val pi = openApp(context, id, tab)
         // 잠금 화면에서 내용을 숨기도록 설정한 경우 보이는 버전: 할 일 내용 없이 개수만
         val publicVersion = Notification.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_pet)
             .setContentTitle(title)
             .setContentText(publicText)
             .build()
-        val notification = Notification.Builder(context, channel)
+        val builder = Notification.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_pet)
             .setContentTitle(title)
             .setContentText(body.lineSequence().firstOrNull() ?: "")
@@ -196,20 +247,25 @@ object Notifier {
             .setPublicVersion(publicVersion)
             .setContentIntent(pi)
             .setAutoCancel(true)
-            .build()
-        context.getSystemService(NotificationManager::class.java).notify(id, notification)
+        if (largeIcon != null) builder.setLargeIcon(largeIcon)
+        context.getSystemService(NotificationManager::class.java).notify(id, builder.build())
     }
 }
 
 object WatchAlerts {
-    /** 누적 알림: 목표 전 30분마다, 목표 이후 15분마다. 같은 기준은 하루에 한 번만. */
-    fun checkCumulative(context: Context, repo: UsageRepository, day: LocalDate) {
+    /**
+     * 누적 알림: 목표 전 30분마다, 목표 이후 15분마다. 같은 기준은 하루에 한 번만.
+     * 보냈으면 true (같은 순간 연속 알림은 보내지 않도록)
+     */
+    fun checkCumulative(context: Context, repo: UsageRepository, day: LocalDate): Boolean {
         val counted = (repo.countedMillis(day) / 60_000L).toInt()
-        val threshold = UsageRepository.alertThreshold(counted, repo.dailyGoalMinutes)
+        val threshold = UsageRepository.alertThreshold(counted, repo.goalFor(day))
         if (threshold >= 30 && threshold > repo.lastAlertMinutes(day)) {
             repo.setLastAlertMinutes(day, threshold)
             repo.increment(day, SyncManager.COUNT_ALERT_CUMULATIVE)
             Notifier.watchAlert(context, day, threshold)
+            return true
         }
+        return false
     }
 }

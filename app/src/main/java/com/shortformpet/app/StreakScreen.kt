@@ -193,7 +193,7 @@ object StreakScreen {
     private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
     /** 요일 칸: 이어 간 날은 불꽃색 원 + 체크, 넘긴 날은 회색, 기록 없는 날은 점선, 오늘은 불꽃색 테두리 */
-    private class DayDot(context: Context, private val mark: Mark) : View(context) {
+    class DayDot(context: Context, private val mark: Mark) : View(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val path = Path()
 

@@ -4,16 +4,13 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * 현재 화면이 숏폼(쇼츠/릴스/틱톡) 시청 화면인지 판별합니다.
+ * 지금 화면이 릴스·쇼츠 시청 화면인지 판별합니다.
  *
- * - 틱톡: 앱 전체가 숏폼이므로 앱이 앞에 있으면 시청 중으로 봅니다.
- * - 유튜브/인스타그램: 전체 화면 숏폼 플레이어의 뷰 ID가 "화면에 보이고 + 화면 높이의 60% 이상"일 때만 인정합니다.
- *   (홈 피드의 쇼츠 묶음, 하단 릴스 탭 버튼 같은 작은 요소로 인한 오감지 방지)
+ * 지정한 뷰 ID 노드가 "화면에 보이고 + 기기 물리 화면 높이의 60% 이상"일 때만 인정합니다.
+ * (홈 피드의 쇼츠 묶음, 하단 탭 버튼, 분할 화면처럼 작은 요소는 재지 않습니다)
  *
- * 화면의 글자, 영상 제목, 계정 정보는 읽지 않습니다. 뷰 ID 존재 여부만 확인합니다.
- *
- * ※ 유튜브·인스타그램 업데이트로 ID가 바뀌면 아래 목록만 수정하면 됩니다.
- *   앱 메인 화면의 "지금 감지 상태"로 바로 확인할 수 있습니다.
+ * 화면의 글자, 영상 제목, 계정 정보는 읽지 않습니다. 뷰 ID 존재 여부와 크기만 확인합니다.
+ * 앱 업데이트로 ID가 바뀌면 아래 목록만 고치면 됩니다.
  */
 object ShortFormDetector {
 
@@ -21,38 +18,35 @@ object ShortFormDetector {
         "com.google.android.youtube:id/reel_player_page_container",
         "com.google.android.youtube:id/reel_recycler",
         "com.google.android.youtube:id/reel_watch_player",
-        "com.google.android.youtube:id/reel_watch_fragment_root",
-        "com.google.android.youtube:id/reel_progress_bar",
     )
 
     val INSTAGRAM_REELS_IDS = listOf(
         "com.instagram.android:id/clips_viewer_view_pager",
-        "com.instagram.android:id/clips_viewer_container",
-        "com.instagram.android:id/clips_video_container",
-        "com.instagram.android:id/clips_swipe_refresh_container",
+        "com.instagram.android:id/reel_viewer_root",
     )
 
-    /** 숏폼 플레이어로 인정할 최소 높이 비율 */
     private const val MIN_HEIGHT_RATIO = 0.6f
 
+    /**
+     * app: 숏폼 화면이면 그 앱, 아니면 null
+     * foregroundPackage: 맨 앞 앱 (집중 세션의 앱 단위 차단에 씁니다)
+     */
     data class Result(val app: ShortFormApp?, val foregroundPackage: String?)
 
-    fun detect(root: AccessibilityNodeInfo?): Result {
+    /** [screenHeight] = 기기 물리 화면 높이(px) */
+    fun detect(root: AccessibilityNodeInfo?, screenHeight: Int): Result {
         if (root == null) return Result(null, null)
         val pkg = root.packageName?.toString()
         val app = ShortFormApp.fromPackage(pkg) ?: return Result(null, pkg)
-        val detected = when (app) {
-            ShortFormApp.TIKTOK -> app
-            ShortFormApp.YOUTUBE_SHORTS -> if (hasFullScreenNode(root, YOUTUBE_SHORTS_IDS)) app else null
-            ShortFormApp.INSTAGRAM_REELS -> if (hasFullScreenNode(root, INSTAGRAM_REELS_IDS)) app else null
+        val ids = when (app) {
+            ShortFormApp.YOUTUBE_SHORTS -> YOUTUBE_SHORTS_IDS
+            ShortFormApp.INSTAGRAM_REELS -> INSTAGRAM_REELS_IDS
         }
-        return Result(detected, pkg)
+        return Result(if (hasFullScreenNode(root, ids, screenHeight)) app else null, pkg)
     }
 
-    private fun hasFullScreenNode(root: AccessibilityNodeInfo, ids: List<String>): Boolean {
-        val rootRect = Rect()
-        root.getBoundsInScreen(rootRect)
-        val minHeight = (rootRect.height() * MIN_HEIGHT_RATIO).toInt()
+    private fun hasFullScreenNode(root: AccessibilityNodeInfo, ids: List<String>, screenHeight: Int): Boolean {
+        val minHeight = (screenHeight * MIN_HEIGHT_RATIO).toInt()
         val rect = Rect()
         for (id in ids) {
             val nodes = try {

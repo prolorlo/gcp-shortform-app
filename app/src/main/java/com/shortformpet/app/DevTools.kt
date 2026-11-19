@@ -39,7 +39,7 @@ object DevTools {
         if (!isDebugBuild(context)) return
         val repo = UsageRepository(Stores.of(context))
         val day = DayClock.logicalDay()
-        repo.addWatch(day, app, minutes * 60_000L, exempt = false)
+        repo.addWatch(day, app, minutes * 60_000L, 0L)
         WatchAlerts.checkCumulative(context, repo, day)
     }
 

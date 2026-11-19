@@ -33,9 +33,23 @@ object DayClock {
     fun startOfDayMillis(day: LocalDate): Long =
         day.atTime(RESET_HOUR, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-    /** 밤 12시~새벽 5시: 할 일 대신 수면 권유 문구를 쓰는 시간대 */
-    fun isLateNight(millis: Long = Now.ms()): Boolean =
-        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).hour < RESET_HOUR
+    /** 23:30~04:59: 할 일 대신 수면 권유 문구를 쓰고, 모찌가 졸린 시간대 */
+    fun isLateNight(millis: Long = Now.ms()): Boolean {
+        val z = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+        return z.hour < RESET_HOUR || (z.hour == 23 && z.minute >= 30)
+    }
+
+    /** 0~23시 */
+    fun hour(millis: Long = Now.ms()): Int = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).hour
+
+    /** 다음 오전 [hour]시의 epoch millis (오전 쪽지 알람용) */
+    fun nextAtHour(hour: Int, now: Long = Now.ms()): Long {
+        val zone = ZoneId.systemDefault()
+        val current = Instant.ofEpochMilli(now).atZone(zone)
+        var next = current.toLocalDate().atTime(hour, 0).atZone(zone)
+        if (!next.isAfter(current)) next = next.plusDays(1)
+        return next.toInstant().toEpochMilli()
+    }
 }
 
 /** 1시간 30분 / 45분 / 0분 */

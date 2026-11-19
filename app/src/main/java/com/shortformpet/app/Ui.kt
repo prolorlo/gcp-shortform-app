@@ -66,6 +66,14 @@ object P {
     /** 흰 바탕 위 불꽃색 글자 */
     val FLAME_TEXT = Color.rgb(201, 76, 10)
 
+    /** 모찌 탭 배경: 방 안 */
+    val ROOM_WALL = Color.rgb(237, 241, 232)
+    val ROOM_FLOOR = Color.rgb(226, 222, 201)
+    val CUSHION = Color.rgb(216, 228, 206)
+    /** 모찌 탭 배경: 들판 */
+    val FIELD_SKY = Color.rgb(235, 241, 236)
+    val FIELD_GRASS = Color.rgb(220, 231, 208)
+
     val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     /** 600. 700 이상은 쓰지 않습니다. 위계는 굵기보다 크기와 색으로 만듭니다. */
     val SEMI: Typeface = if (android.os.Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, 600, false) else MEDIUM
@@ -344,8 +352,10 @@ class WeekChartView(context: Context) : View(context) {
  * 선 아이콘. 한 벌, 같은 상자 크기, 같은 굵기(1.5dp 이상), 글자 색을 따릅니다.
  * 이모지·특수 기호 대신 씁니다.
  */
-class LineIcon(context: Context, private val kind: Kind) : View(context) {
-    enum class Kind { HOME, STUDY, RECORD, SETTINGS, INFO, CHEVRON, FLAME }
+class LineIcon(context: Context, kind: Kind) : View(context) {
+    var kind: Kind = kind
+        set(value) { if (field != value) { field = value; invalidate() } }
+    enum class Kind { HOME, STUDY, RECORD, SETTINGS, INFO, CHEVRON, FLAME, HOUSE, FIELD, PLUS }
 
     var color: Int = P.MUTED
         set(value) { field = value; invalidate() }
@@ -420,6 +430,27 @@ class LineIcon(context: Context, private val kind: Kind) : View(context) {
                 path.close()
                 canvas.drawPath(path, paint)
             }
+            Kind.HOUSE -> {
+                // 방 안: 지붕 + 집 + 창
+                path.moveTo(x(3.5f), y(11f)); path.lineTo(x(12f), y(4f)); path.lineTo(x(20.5f), y(11f))
+                canvas.drawPath(path, paint)
+                path.reset()
+                path.moveTo(x(5.5f), y(9.5f)); path.lineTo(x(5.5f), y(20f)); path.lineTo(x(18.5f), y(20f)); path.lineTo(x(18.5f), y(9.5f))
+                canvas.drawPath(path, paint)
+                r.set(x(10f), y(13f), x(14f), y(17f)); canvas.drawRect(r, paint)
+            }
+            Kind.FIELD -> {
+                // 들판: 해 + 언덕
+                canvas.drawCircle(x(16.5f), y(7.5f), u * 3f, paint)
+                path.moveTo(x(2.5f), y(19.5f))
+                path.quadTo(x(8f), y(11f), x(13f), y(16f))
+                path.quadTo(x(17f), y(13f), x(21.5f), y(17.5f))
+                canvas.drawPath(path, paint)
+            }
+            Kind.PLUS -> {
+                canvas.drawLine(x(12f), y(5f), x(12f), y(19f), paint)
+                canvas.drawLine(x(5f), y(12f), x(19f), y(12f), paint)
+            }
         }
     }
 }
@@ -432,6 +463,8 @@ class Pager(context: Context) : ViewGroup(context) {
     var onPageChanged: ((Int) -> Unit)? = null
     var current = 0
         private set
+    /** 밥 던지기 조준 중에는 옆으로 넘기지 않습니다. */
+    var locked = false
 
     private val scroller = OverScroller(context, DecelerateInterpolator(2.2f))
     private val config = ViewConfiguration.get(context)
@@ -481,6 +514,7 @@ class Pager(context: Context) : ViewGroup(context) {
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (locked) return false
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = ev.x; downY = ev.y; lastX = ev.x
@@ -493,7 +527,7 @@ class Pager(context: Context) : ViewGroup(context) {
                 velocity?.addMovement(ev)
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                if (!dragging && abs(dx) > slop && abs(dx) > abs(dy) * 1.5f) {
+                if (!dragging && abs(dx) > slop && abs(dx) > abs(dy) * 1.4f) {
                     dragging = true
                     lastX = ev.x
                     parent?.requestDisallowInterceptTouchEvent(true)

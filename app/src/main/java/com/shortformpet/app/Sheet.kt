@@ -134,6 +134,40 @@ object Sheet {
         }, 150)
     }
 
+    /**
+     * 내용을 직접 넣는 시트. [build]는 제목 아래에 들어갈 내용을 채우고,
+     * 닫을 때 쓸 함수(dismiss)를 받습니다. 버튼이 필요하면 [primary]를 줍니다.
+     */
+    fun custom(
+        context: Context,
+        title: String?,
+        primary: Action? = null,
+        secondaryLabel: String? = "취소",
+        cancelable: Boolean = true,
+        maxHeightRatio: Float? = null,
+        onDismiss: (() -> Unit)? = null,
+        build: LinearLayout.(dismiss: () -> Unit) -> Unit,
+    ) {
+        val dialog = newDialog(context, cancelable)
+        val body = panel(context)
+        if (title != null) body.addView(titleView(context, title))
+        val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        content.build { dialog.dismiss() }
+        if (maxHeightRatio != null) {
+            body.addView(content, LinearLayout.LayoutParams(MATCH, 0, 1f).apply { if (title != null) topMargin = context.dp(8) })
+        } else {
+            body.addView(content, lp(context, top = if (title != null) 8 else 0))
+        }
+        if (primary != null) body.addView(buttons(context, dialog, secondaryLabel, null, primary) { true }, lp(context, top = 24))
+        show(dialog, body, maxHeightRatio)
+        if (onDismiss != null) {
+            dialog.setOnDismissListener {
+                dialogCancelable.remove(dialog)
+                onDismiss()
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ 내부
 
     private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT

@@ -16,7 +16,7 @@ data class DeviceInfo(
  * 서버 동기화 대기 목록과 전송 내용(하루 한 건)을 만듭니다.
  *
  * 보내는 것: 익명 ID, 날짜, 앱별 시청 시간, 측정 시간, 알림 횟수,
- *           (선택) 앱·기기 버전, 목표 시간, 캐릭터 단계·체력, 앱 실행 횟수, 공부 모드 기록, 연속일수
+ *           (선택) 앱·기기 버전, 목표 시간, 캐릭터 단계·행복도, 앱 실행 횟수, 공부 모드 기록, 연속일수
  * 보내지 않는 것: 화면 내용, 영상 제목, 계정, 캐릭터 이름, 할 일 내용, 위치·연락처
  */
 class SyncManager(private val stores: Stores) {
@@ -60,7 +60,6 @@ class SyncManager(private val stores: Stores) {
         json.obj("watchSec") {
             num("youtubeShorts", repo.millis(day, ShortFormApp.YOUTUBE_SHORTS) / 1000)
             num("instagramReels", repo.millis(day, ShortFormApp.INSTAGRAM_REELS) / 1000)
-            num("tiktok", repo.millis(day, ShortFormApp.TIKTOK) / 1000)
         }
         json.num("trackedSec", repo.trackedMillis(day) / 1000)
         json.obj("alerts") {
@@ -85,7 +84,7 @@ class SyncManager(private val stores: Stores) {
         if (snap.size >= 4) {
             json.obj("pet") {
                 str("stage", snap[0])
-                num("health", snap[1].toIntOrNull() ?: 0)
+                num("happiness", snap[1].toIntOrNull() ?: 0)
             }
             json.obj("streak") {
                 num("days", snap[2].toIntOrNull() ?: 0)

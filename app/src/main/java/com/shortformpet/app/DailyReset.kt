@@ -25,6 +25,7 @@ object DailyResetScheduler {
         )
         // 가상 시각(개발자 테스트)을 쓰는 중이면 실제 시각으로 되돌려 예약합니다.
         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, DayClock.nextResetMillis() - Now.offsetMs, pi)
+        MorningNoteScheduler.schedule(context)
     }
 }
 
@@ -38,6 +39,32 @@ class DailyResetReceiver : BroadcastReceiver() {
         if (results.isNotEmpty()) Notifier.dailyReport(context, results.last().message)
         DailyResetScheduler.schedule(context)
         SyncScheduler.kick(context)
+        MochiWidgetProvider.update(context, force = true)
+        if (!MainActivity.inForeground) AppIconSwitcher.applyIfNeeded(context)
+    }
+}
+
+/** 오전 9시 일일 집중 쪽지 */
+object MorningNoteScheduler {
+    const val HOUR = 9
+
+    fun schedule(context: Context) {
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val pi = PendingIntent.getBroadcast(
+            context,
+            1,
+            Intent(context, MorningNoteReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, DayClock.nextAtHour(HOUR) - Now.offsetMs, pi)
+    }
+}
+
+class MorningNoteReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+        val repo = UsageRepository(Stores.of(context))
+        if (repo.morningNoteEnabled && repo.consentAccepted) Notifier.morningNote(context)
+        MorningNoteScheduler.schedule(context)
     }
 }
 

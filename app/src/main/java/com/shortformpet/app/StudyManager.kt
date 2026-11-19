@@ -6,7 +6,13 @@ data class Todo(val text: String, val done: Boolean)
 
 sealed class StudyEvent {
     /** 세션 완료: 받은 쿠폰(분), 보호권을 새로 받았는지 */
-    data class SessionCompleted(val sessionMinutes: Int, val couponMinutes: Int, val shieldGranted: Boolean) : StudyEvent()
+    data class SessionCompleted(
+        val sessionMinutes: Int,
+        val couponMinutes: Int,
+        val shieldGranted: Boolean,
+        /** 오늘 받을 수 있는 쿠폰(20분)을 이미 다 받아서 못 받았을 때 */
+        val couponCapped: Boolean = false,
+    ) : StudyEvent()
     object CouponEnded : StudyEvent()
 }
 
@@ -153,11 +159,11 @@ class StudyManager(stores: Stores) {
 
     fun sessionLengthMinutes(): Int = kv.getInt("sess_min", 25)
 
-    /** 25분 또는 50분 세션 시작. 세션 중에는 휴식 쿠폰을 끕니다. */
+    /** 5분 착수 · 25분 · 50분 세션 시작. 세션 중에는 휴식 쿠폰을 끕니다. */
     fun startSession(minutes: Int, now: Long = Now.ms()): Boolean {
         sync(now)
         if (kv.getLong("sess_end", 0L) > 0L) return false
-        val len = if (minutes == 50) 50 else 25
+        val len = if (minutes in UsageRepository.SESSION_LENGTHS) minutes else 25
         setCoupon(false, now)
         kv.edit {
             putLong("sess_start", now)
@@ -178,7 +184,18 @@ class StudyManager(stores: Stores) {
     }
 
     private fun clearSession() = kv.edit {
-        remove("sess_start"); remove("sess_end"); remove("sess_min")
+        remove("sess_start"); remove("sess_end"); remove("sess_min"); remove("sess_yt_ok"); remove("sess_yt_asked")
+    }
+
+    /** 이번 세션에서 유튜브를 과제용으로 허락했는지 (쇼츠는 그래도 막습니다) */
+    fun youtubeAllowed(): Boolean = kv.getBoolean("sess_yt_ok", false)
+
+    /** 이번 세션에서 유튜브 질문을 이미 했는지 */
+    fun youtubeAsked(): Boolean = kv.getBoolean("sess_yt_asked", false)
+
+    fun setYoutubeAnswer(allowed: Boolean) = kv.edit {
+        putBoolean("sess_yt_asked", true)
+        putBoolean("sess_yt_ok", allowed)
     }
 
     // ------------------------------------------------------------ 휴식 쿠폰
@@ -270,14 +287,17 @@ class StudyManager(stores: Stores) {
             val day = DayClock.logicalDay(end)
             clearSession()
 
-            val couponMin = if (len == 50) 10 else 5
+            // 5분 착수는 시작을 돕는 용도라 쿠폰·보호권 없이 완료만 기록합니다.
+            val couponMin = couponFor(len)
             val earnedBefore = dayLong(day, "coupon_earned")
             val earnedAfter = (earnedBefore + couponMin * 60_000L).coerceAtMost(MAX_COUPON_MS_PER_DAY)
 
-            var progress = shieldProgress() + 1
+            var progress = shieldProgress() + if (len >= 25) 1 else 0
             var shield = shields()
             var granted = false
-            if (shield == 0 && progress >= SESSIONS_PER_SHIELD) {
+            if (len < 25) {
+                // 보호권 진행 없음
+            } else if (shield == 0 && progress >= SESSIONS_PER_SHIELD) {
                 shield = 1; progress = 0; granted = true
             } else if (shield >= 1) {
                 // 보호권은 최대 1개. 갖고 있는 동안에는 4회까지만 쌓아 둡니다.
@@ -289,7 +309,7 @@ class StudyManager(stores: Stores) {
                 putInt("shield", shield)
                 putInt("shield_progress", progress)
             }
-            events += StudyEvent.SessionCompleted(len, ((earnedAfter - earnedBefore) / 60_000L).toInt(), granted)
+            events += StudyEvent.SessionCompleted(len, ((earnedAfter - earnedBefore) / 60_000L).toInt(), granted, couponMin > 0 && earnedAfter == earnedBefore)
         }
 
         if (couponOnSince() > 0L && settleCoupon(now)) events += StudyEvent.CouponEnded
@@ -310,5 +330,12 @@ class StudyManager(stores: Stores) {
         const val MAX_TODO_LENGTH = 30
         const val SESSIONS_PER_SHIELD = 5
         const val MAX_COUPON_MS_PER_DAY = 20 * 60_000L
+
+        /** 세션 길이별 휴식 쿠폰(분): 5분 0, 25분 5, 50분 10 */
+        fun couponFor(minutes: Int): Int = when (minutes) {
+            50 -> 10
+            25 -> 5
+            else -> 0
+        }
     }
 }

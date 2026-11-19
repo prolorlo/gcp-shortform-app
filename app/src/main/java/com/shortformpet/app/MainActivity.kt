@@ -59,25 +59,16 @@ class MainActivity : Activity() {
     private lateinit var pager: Pager
     private val tabs = mutableListOf<Pair<LineIcon, TextView>>()
 
-    // 오늘
-    private lateinit var dateText: TextView
-    private lateinit var permCard: LinearLayout
-    private lateinit var permTitle: TextView
-    private lateinit var accRow: View
-    private lateinit var notiRow: View
-    private lateinit var battRow: View
-    private lateinit var setupHint: View
-    private lateinit var setupHintValue: TextView
-    private lateinit var petView: PetView
+    // 모찌 (전체 화면)
+    private lateinit var world: PetWorldView
+    private lateinit var hud: LinearLayout
+    private lateinit var dock: LinearLayout
     private lateinit var petName: TextView
     private lateinit var petStage: TextView
     private lateinit var streakText: TextView
     private lateinit var streakIcon: LineIcon
+    private lateinit var sceneIcon: LineIcon
     private lateinit var petNote: TextView
-    /** 방금 완료한 할 일(되돌리기 버튼을 잠깐 보여 줌) */
-    private var undoIndex = -1
-    private var undoUntil = 0L
-    private lateinit var speech: TextView
     private lateinit var petHint: TextView
     private lateinit var hpBar: ProgressBar
     private lateinit var hpText: TextView
@@ -86,6 +77,19 @@ class MainActivity : Activity() {
     private lateinit var expNote: TextView
     private lateinit var feedButton: TextView
     private lateinit var snackButton: TextView
+
+    // 오늘·할 일
+    private lateinit var dateText: TextView
+    private lateinit var permCard: LinearLayout
+    private lateinit var permTitle: TextView
+    private lateinit var accRow: View
+    private lateinit var notiRow: View
+    private lateinit var battRow: View
+    private lateinit var setupHint: View
+    private lateinit var setupHintValue: TextView
+    /** 방금 완료한 할 일(되돌리기 버튼을 잠깐 보여 줌) */
+    private var undoIndex = -1
+    private var undoUntil = 0L
     private lateinit var todayTotal: TextView
     private lateinit var todayGoal: TextView
     private lateinit var todayBar: ProgressBar
@@ -95,11 +99,6 @@ class MainActivity : Activity() {
     private lateinit var detectDot: View
     private lateinit var detectText: TextView
     private lateinit var resetText: TextView
-    private lateinit var shortcutTitle: TextView
-    private lateinit var shortcutValue: TextView
-
-    // 공부
-    private lateinit var studySub: TextView
     private lateinit var todoList: LinearLayout
     private lateinit var todoHint: TextView
     private lateinit var addTodoRow: View
@@ -119,9 +118,14 @@ class MainActivity : Activity() {
     private lateinit var weekSummary: TextView
     private var bestStreak = 0
     private lateinit var reportText: TextView
+    private lateinit var stampRow: LinearLayout
+    private lateinit var stampNote: TextView
 
     // 설정
     private lateinit var goalPicker: Segmented
+    private lateinit var intervalValue: TextView
+    private lateinit var slotList: LinearLayout
+    private var slotSignature = ""
     private lateinit var nameValue: TextView
     private lateinit var accStatus: TextView
     private lateinit var notiStatus: TextView
@@ -130,8 +134,7 @@ class MainActivity : Activity() {
     // 개발자 테스트 (디버그 빌드 전용)
     private var devInfo: TextView? = null
 
-    private var tempSpeech: String? = null
-    private var tempSpeechUntil = 0L
+    private var lastWidgetPush = 0L
     private var lastWeekRender = 0L
 
     private val uiPrefs by lazy { getSharedPreferences("ui", MODE_PRIVATE) }
@@ -155,14 +158,30 @@ class MainActivity : Activity() {
         setContentView(buildUi())
         // 3버튼 내비게이션에서 아래 탭 바 밑에 회색 막이 덧씌워지지 않게 합니다.
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
-        selectTab(savedInstanceState?.getInt(KEY_TAB) ?: intent.getIntExtra(EXTRA_TAB, TAB_TODAY), animate = false)
-        if (!repo.consentAccepted) showConsent()
+        selectTab(savedInstanceState?.getInt(KEY_TAB) ?: intent.getIntExtra(EXTRA_TAB, TAB_MOCHI), animate = false)
+        when {
+            !repo.consentAccepted -> showConsent()
+            !repo.manualSeen -> handler.postDelayed({ showManual() }, 300)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // 집중 고정 알림을 누르면 공부 탭으로
-        if (intent.hasExtra(EXTRA_TAB)) selectTab(intent.getIntExtra(EXTRA_TAB, TAB_TODAY))
+        // 알림·위젯을 누르면 해당 탭으로
+        if (intent.hasExtra(EXTRA_TAB)) selectTab(intent.getIntExtra(EXTRA_TAB, TAB_MOCHI))
+    }
+
+    override fun onStart() {
+        super.onStart()
+        inForeground = true
+    }
+
+    override fun onStop() {
+        inForeground = false
+        // 앱이 뒤로 내려간 뒤에만 런처 아이콘 표정을 바꿉니다(앞에 있을 때 바꾸면 런처가 깜빡일 수 있음).
+        AppIconSwitcher.applyIfNeeded(this)
+        MochiWidgetProvider.update(this, force = true)
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -176,30 +195,40 @@ class MainActivity : Activity() {
         todoSignature = ""
         handler.post(refresher)
         SyncScheduler.kick(this)
-        // 정산이 끝난 뒤 그날 처음 열었을 때 한 번만 연속일수를 보여 줍니다.
-        handler.postDelayed({ maybeShowStreak() }, 350)
+        world.active = pager.current == TAB_MOCHI
+        // 정산이 끝난 뒤 그날 처음 열었을 때 한 번만 연속일수를 보여 주고, 성장했으면 성장 모션을 재생합니다.
+        handler.postDelayed({ maybeShowStreak(); maybePlayEvolution() }, 350)
     }
 
     override fun onPause() {
         handler.removeCallbacks(refresher)
+        world.active = false
         super.onPause()
     }
 
     @Deprecated("Activity 기본 뒤로 가기")
     override fun onBackPressed() {
-        // 다른 탭에서 뒤로 가기를 누르면 먼저 '오늘'로 돌아옵니다.
-        if (pager.current != TAB_TODAY) selectTab(TAB_TODAY) else @Suppress("DEPRECATION") super.onBackPressed()
+        when {
+            world.aiming -> setAiming(false)
+            // 다른 탭에서 뒤로 가기를 누르면 먼저 '모찌'로 돌아옵니다.
+            pager.current != TAB_MOCHI -> selectTab(TAB_MOCHI)
+            else -> @Suppress("DEPRECATION") super.onBackPressed()
+        }
     }
 
     // ------------------------------------------------------------------ 뼈대: 페이지 + 아래 탭
 
     private fun buildUi(): View {
         pager = Pager(this).apply {
+            addView(buildMochiPage())
             addView(buildTodayPage())
-            addView(buildStudyPage())
             addView(buildRecordPage())
             addView(buildSettingsPage())
-            onPageChanged = { highlightTab(it) }
+            onPageChanged = {
+                highlightTab(it)
+                world.active = it == TAB_MOCHI
+                if (it != TAB_MOCHI && world.aiming) setAiming(false)
+            }
         }
 
         val nav = LinearLayout(this).apply {
@@ -207,8 +236,8 @@ class MainActivity : Activity() {
             setBackgroundColor(P.SURFACE)
         }
         listOf(
-            Triple("오늘", LineIcon.Kind.HOME, TAB_TODAY),
-            Triple("공부", LineIcon.Kind.STUDY, TAB_STUDY),
+            Triple("모찌", LineIcon.Kind.HOME, TAB_MOCHI),
+            Triple("오늘·할 일", LineIcon.Kind.STUDY, TAB_TODAY),
             Triple("기록", LineIcon.Kind.RECORD, TAB_RECORD),
             Triple("설정", LineIcon.Kind.SETTINGS, TAB_SETTINGS),
         ).forEach { (name, kind, index) ->
@@ -298,16 +327,145 @@ class MainActivity : Activity() {
 
     // ------------------------------------------------------------------ 오늘
 
+    /**
+     * 모찌 탭: 카드 없이 화면 전체가 모찌의 방(또는 들판)입니다.
+     * 위에 이름·연속일수·행복도·경험치 HUD, 아래에 밥 던지기·간식 도크를 얹습니다.
+     */
+    private fun buildMochiPage(): View {
+        val frame = android.widget.FrameLayout(this)
+        world = PetWorldView(this).apply {
+            onPetTapped = { onPetTapped() }
+            onFoodCaught = { onFoodCaught() }
+            onFoodMissed = { say(Lines.FEED_MISS, 2_000) }
+        }
+        frame.addView(world, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
+
+        // ---- 위 HUD
+        hud = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16.dp, 12.dp, 16.dp, 14.dp)
+            background = roundRect(P.SURFACE, 16.dp.toFloat(), 1.dp, P.LINE)
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val names = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.BOTTOM
+            isClickable = true
+            setOnClickListener { showRename() }
+        }
+        petName = label("", 20f, P.INK, W.SEMI)
+        petStage = label("", 13f, P.SUB).apply { setPadding(8.dp, 0, 0, 2.dp) }
+        names.addView(petName)
+        names.addView(petStage)
+        header.addView(names, LinearLayout.LayoutParams(0, WRAP, 1f))
+        val streakChip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(10.dp, 6.dp, 10.dp, 6.dp)
+            isClickable = true
+            background = pressable(roundRect(P.SOFT, 10.dp.toFloat()), 10.dp.toFloat())
+            setOnClickListener { showStreak() }
+        }
+        streakIcon = LineIcon(this, LineIcon.Kind.FLAME)
+        streakChip.addView(streakIcon, LinearLayout.LayoutParams(18.dp, 18.dp).apply { marginEnd = 4.dp })
+        streakText = label("", 14f, P.INK, W.SEMI, tabular = true)
+        streakChip.addView(streakText)
+        header.addView(streakChip)
+        val sceneButton = android.widget.FrameLayout(this).apply {
+            isClickable = true
+            background = pressable(roundRect(P.SOFT, 10.dp.toFloat()), 10.dp.toFloat())
+            setOnClickListener {
+                pet.scene = 1 - pet.scene
+                refresh()
+            }
+        }
+        sceneIcon = LineIcon(this, LineIcon.Kind.FIELD).apply { color = P.INK }
+        sceneButton.addView(sceneIcon, android.widget.FrameLayout.LayoutParams(20.dp, 20.dp, Gravity.CENTER))
+        header.addView(sceneButton, LinearLayout.LayoutParams(36.dp, 32.dp).apply { marginStart = 8.dp })
+        hud.addView(header)
+
+        hpText = label("", 13f, P.INK, tabular = true)
+        hpBar = bar(P.ACCENT)
+        expText = label("", 13f, P.INK, tabular = true)
+        expNote = label("", 12f, P.SUB, tabular = true)
+        expBar = bar(P.INK)
+        hud.addView(statRow(hpText, null), lp(MATCH, WRAP, top = 12))
+        hud.addView(hpBar, lp(MATCH, 6.dp, top = 6))
+        hud.addView(statRow(expText, expNote), lp(MATCH, WRAP, top = 10))
+        hud.addView(expBar, lp(MATCH, 6.dp, top = 6))
+        frame.addView(hud, android.widget.FrameLayout.LayoutParams(MATCH, WRAP, Gravity.TOP).apply {
+            setMargins(12.dp, 8.dp, 12.dp, 0)
+        })
+
+        // ---- 아래 도크
+        dock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16.dp, 12.dp, 16.dp, 12.dp)
+            background = roundRect(P.SURFACE, 16.dp.toFloat(), 1.dp, P.LINE)
+        }
+        petHint = label("", 12f, P.SUB)
+        dock.addView(petHint, lp(MATCH, WRAP).apply { bottomMargin = 8.dp })
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        feedButton = btn(Lines.THROW, BtnStyle.PRIMARY) { setAiming(!world.aiming) }
+        snackButton = btn(Lines.SNACK_EMPTY, BtnStyle.OUTLINE) {
+            val reply = pet.giveSnack()
+            world.say(reply)
+            world.react()
+            if (reply != Lines.SNACK_NONE && reply != Lines.SNACK_EGG) world.floatText("+${PetEngine.SNACK_H}")
+            refresh()
+        }
+        buttons.addView(feedButton, LinearLayout.LayoutParams(0, 48.dp, 1f).apply { marginEnd = 8.dp })
+        buttons.addView(snackButton, LinearLayout.LayoutParams(0, 48.dp, 1f))
+        dock.addView(buttons)
+        // 버튼을 못 누르는 이유
+        petNote = label("", 12f, P.SUB)
+        dock.addView(petNote, lp(MATCH, WRAP, top = 8))
+        frame.addView(dock, android.widget.FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply {
+            setMargins(12.dp, 0, 12.dp, 12.dp)
+        })
+
+        // HUD·도크 높이만큼은 모찌가 걷는 자리에서 뺍니다.
+        hud.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> world.insetTop = (v.bottom + 4.dp).toFloat() }
+        dock.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> world.insetBottom = (frame.height - v.top + 4.dp).toFloat() }
+        return frame
+    }
+
+    private fun setAiming(on: Boolean) {
+        if (on && !canFeed()) return
+        world.aiming = on
+        pager.locked = on
+        if (on) world.say(Lines.FEED_AIM, 3_000)
+        refresh()
+    }
+
+    private fun canFeed(): Boolean {
+        val s = pet.state()
+        return !s.isEgg && !s.fedToday
+    }
+
+    private fun onFoodCaught() {
+        val before = pet.state().happiness
+        val reply = pet.feed()
+        world.say(reply)
+        val gain = pet.state().happiness - before
+        if (gain > 0) world.floatText("+$gain")
+        setAiming(false)
+    }
+
     private fun buildTodayPage(): View {
         dateText = label("", 13f, P.SUB, tabular = true)
-        return page("오늘", dateText) {
+        return page("오늘·할 일", dateText) {
             addView(buildPermissionCard())
             setupHintValue = label("", 14f, P.OVER_TEXT, tabular = true)
             setupHint = card(padV = 4).apply { addView(linkRow("알림 · 배터리 설정", setupHintValue) { selectTab(TAB_SETTINGS) }) }
             addView(setupHint)
-            addView(buildPetCard())
             addView(buildWatchCard())
-            addView(buildShortcutCard())
+            addView(buildTodoCard())
+            addView(buildSessionCard())
+            addView(buildRewardCard())
         }
     }
 
@@ -325,83 +483,6 @@ class MainActivity : Activity() {
         notiRow.visibility = View.GONE
         battRow.visibility = View.GONE
         return permCard
-    }
-
-    private fun buildPetCard(): View {
-        val c = card(bg = P.PET_BG, border = false)
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.TOP
-        }
-        val names = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            isClickable = true
-            setOnClickListener { showRename() }
-        }
-        petName = label("", 22f, P.INK, W.SEMI)
-        petStage = label("", 13f, P.SUB)
-        names.addView(petName)
-        names.addView(petStage, lp(WRAP, WRAP, top = 4))
-        header.addView(names, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val streakChip = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(12.dp, 8.dp, 12.dp, 8.dp)
-            isClickable = true
-            background = pressable(roundRect(P.SURFACE, 12.dp.toFloat()), 12.dp.toFloat())
-            setOnClickListener { showStreak() }
-        }
-        streakIcon = LineIcon(this, LineIcon.Kind.FLAME)
-        streakChip.addView(streakIcon, LinearLayout.LayoutParams(20.dp, 20.dp).apply { marginEnd = 4.dp })
-        streakText = label("", 15f, P.INK, W.SEMI, tabular = true)
-        streakChip.addView(streakText)
-        header.addView(streakChip)
-        c.addView(header)
-
-        speech = label("", 14f, P.INK).apply {
-            gravity = Gravity.CENTER
-            setPadding(16.dp, 12.dp, 16.dp, 12.dp)
-            background = roundRect(P.SURFACE, 12.dp.toFloat())
-            maxWidth = 280.dp
-        }
-        c.addView(speech, lp(WRAP, WRAP, top = 16).apply { gravity = Gravity.CENTER_HORIZONTAL })
-
-        petView = PetView(this).apply {
-            contentDescription = "캐릭터. 눌러서 쓰다듬기"
-            setOnClickListener { onPetTapped() }
-        }
-        c.addView(petView, lp(MATCH, 180.dp, top = 4))
-        petHint = label("눌러서 쓰다듬어 보세요", 12f, P.SUB).apply { gravity = Gravity.CENTER }
-        c.addView(petHint, lp(MATCH, WRAP))
-
-        hpText = label("", 13f, P.INK, tabular = true)
-        hpBar = bar(P.ACCENT, track = Color.argb(150, 255, 255, 255))
-        expText = label("", 13f, P.INK, tabular = true)
-        expBar = bar(P.INK, track = Color.argb(150, 255, 255, 255))
-        expNote = label("", 12f, P.SUB, tabular = true)
-        c.addView(statRow("체력", hpText), lp(MATCH, WRAP, top = 20))
-        c.addView(hpBar, lp(MATCH, 6.dp, top = 8))
-        c.addView(statRow("경험치", expText), lp(MATCH, WRAP, top = 16))
-        c.addView(expBar, lp(MATCH, 6.dp, top = 8))
-        c.addView(expNote, lp(MATCH, WRAP, top = 8))
-
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        feedButton = btn("밥 주기", BtnStyle.PRIMARY) {
-            showTempSpeech(pet.feed())
-            refresh()
-        }
-        snackButton = btn("간식 주기", BtnStyle.OUTLINE) {
-            showTempSpeech(pet.giveSnack())
-            petView.pet()
-            refresh()
-        }
-        buttons.addView(feedButton, LinearLayout.LayoutParams(0, 48.dp, 1f).apply { marginEnd = 8.dp })
-        buttons.addView(snackButton, LinearLayout.LayoutParams(0, 48.dp, 1f))
-        c.addView(buttons, lp(MATCH, WRAP, top = 20))
-        // 버튼을 못 누르는 이유
-        petNote = label("", 12f, P.SUB)
-        c.addView(petNote, lp(MATCH, WRAP, top = 8))
-        return c
     }
 
     private fun buildWatchCard(): View {
@@ -460,35 +541,6 @@ class MainActivity : Activity() {
         return c
     }
 
-    /** 오늘 탭에서 공부 탭으로 넘어가는 한 줄 */
-    private fun buildShortcutCard(): View {
-        val c = card(padV = 16)
-        c.orientation = LinearLayout.HORIZONTAL
-        c.gravity = Gravity.CENTER_VERTICAL
-        c.isClickable = true
-        c.background = pressable(roundRect(P.SURFACE, 16.dp.toFloat(), 1.dp, P.LINE), 16.dp.toFloat())
-        c.setOnClickListener { selectTab(TAB_STUDY) }
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        shortcutTitle = label("", 15f, P.INK, W.MEDIUM)
-        shortcutValue = label("", 13f, P.SUB, tabular = true)
-        texts.addView(shortcutTitle)
-        texts.addView(shortcutValue, lp(WRAP, WRAP, top = 4))
-        c.addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f))
-        c.addView(LineIcon(this, LineIcon.Kind.CHEVRON), LinearLayout.LayoutParams(20.dp, 20.dp))
-        return c
-    }
-
-    // ------------------------------------------------------------------ 공부
-
-    private fun buildStudyPage(): View {
-        studySub = label("", 13f, P.SUB, tabular = true)
-        return page("공부", studySub) {
-            addView(buildTodoCard())
-            addView(buildSessionCard())
-            addView(buildRewardCard())
-        }
-    }
-
     private fun buildTodoCard(): View {
         val c = card(padV = 12)
         c.addView(label("오늘 할 일", 17f, P.INK, W.MEDIUM), lp(MATCH, WRAP, top = 8))
@@ -514,14 +566,14 @@ class MainActivity : Activity() {
         c.addView(label("집중 세션", 17f, P.INK, W.MEDIUM))
 
         idleSession = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        lengthPicker = Segmented(this, listOf("25분", "50분")) { i ->
-            repo.sessionMinutes = if (i == 1) 50 else 25
+        lengthPicker = Segmented(this, listOf("5분 착수", "25분", "50분")) { i ->
+            repo.sessionMinutes = UsageRepository.SESSION_LENGTHS[i]
             refresh()
         }
         idleSession.addView(lengthPicker, lp(MATCH, 44.dp))
         sessionButton = btn("", BtnStyle.PRIMARY, 16f) { onSessionButton() }
         idleSession.addView(sessionButton, lp(MATCH, 52.dp, top = 8))
-        idleSession.addView(label("집중하는 동안 쇼츠·릴스·틱톡을 막아요. 일반 영상과 피드는 그대로예요", 12f, P.SUB), lp(MATCH, WRAP, top = 12))
+        idleSession.addView(label("집중하는 동안 인스타는 잠그고, 유튜브는 과제용일 때만 일반 영상을 열어 둬요. 쇼츠는 끝까지 막아요", 12f, P.SUB), lp(MATCH, WRAP, top = 12))
         c.addView(idleSession, lp(MATCH, WRAP, top = 16))
 
         activeSession = LinearLayout(this).apply {
@@ -540,7 +592,7 @@ class MainActivity : Activity() {
         activeRow.addView(activeTexts, LinearLayout.LayoutParams(0, WRAP, 1f))
         activeRow.addView(btn("그만두기", BtnStyle.ON_DARK, 14f) { onSessionButton() }, LinearLayout.LayoutParams(WRAP, 40.dp))
         activeSession.addView(activeRow)
-        activeSession.addView(label("쇼츠·릴스·틱톡을 막고 있어요", 12f, Color.argb(160, 255, 255, 255)), lp(MATCH, WRAP, top = 12))
+        activeSession.addView(label("인스타와 쇼츠를 막고 있어요", 12f, Color.argb(160, 255, 255, 255)), lp(MATCH, WRAP, top = 12))
         c.addView(activeSession, lp(MATCH, WRAP, top = 16))
         return c
     }
@@ -602,6 +654,17 @@ class MainActivity : Activity() {
         chart.addView(weekSummary, lp(MATCH, WRAP, top = 16))
         addView(chart)
 
+        // 연속일수 주간 달성표 + 최고 기록
+        val streakCard = card()
+        streakCard.isClickable = true
+        streakCard.setOnClickListener { showStreak() }
+        streakCard.addView(label("연속일수", 17f, P.INK, W.MEDIUM))
+        stampRow = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL }
+        streakCard.addView(stampRow, lp(MATCH, WRAP, top = 16))
+        stampNote = label("", 14f, P.SUB, tabular = true)
+        streakCard.addView(stampNote, lp(MATCH, WRAP, top = 12))
+        addView(streakCard)
+
         val report = card()
         report.addView(label("최근 정산", 17f, P.INK, W.MEDIUM))
         report.addView(label("매일 오전 5시에 전날 기록으로 정산해요", 12f, P.MUTED), lp(MATCH, WRAP, top = 4))
@@ -615,8 +678,8 @@ class MainActivity : Activity() {
     private fun buildSettingsPage(): View = page("설정") {
         val c = card()
         c.addView(label("하루 목표", 15f, P.INK, W.MEDIUM))
-        c.addView(label("목표 이하로 본 날은 체력과 연속일수가 올라요", 12f, P.SUB), lp(MATCH, WRAP, top = 4))
-        val goals = (UsageRepository.GOAL_MIN..UsageRepository.GOAL_MAX step 30).toList() // 30, 60, 90, 120분
+        c.addView(label("목표 이하로 본 날은 연속일수가 올라요", 12f, P.SUB), lp(MATCH, WRAP, top = 4))
+        val goals = UsageRepository.GOAL_OPTIONS // 30, 40, 50, 60분
         goalPicker = Segmented(this@MainActivity, goals.map { formatMinutes(it) }) { i ->
             repo.dailyGoalMinutes = goals[i]
             lastWeekRender = 0L
@@ -626,49 +689,51 @@ class MainActivity : Activity() {
         c.addView(goalPicker, lp(MATCH, 44.dp, top = 12))
         c.addView(divider(), lp(MATCH, 1.dp, top = 20))
 
-        val guideRow = LinearLayout(this@MainActivity).apply {
+        // 연속 시청 알림 주기 (1~45분)
+        val intervalRow = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = 72.dp
         }
-        val guideTexts = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        guideTexts.addView(label("진입 안내 화면", 15f, P.INK, W.MEDIUM))
-        guideTexts.addView(label("목표를 넘긴 뒤 숏폼을 켜면 3초 동안 보여줘요", 12f, P.SUB), lp(WRAP, WRAP, top = 4))
-        guideRow.addView(guideTexts, LinearLayout.LayoutParams(0, WRAP, 1f))
-        guideRow.addView(Switch(this@MainActivity).apply {
-            isChecked = repo.entryGuideEnabled
-            contentDescription = "진입 안내 화면"
-            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            thumbTintList = ColorStateList(states, intArrayOf(P.INK, Color.WHITE))
-            trackTintList = ColorStateList(states, intArrayOf(P.INK, Color.rgb(170, 162, 154)))
-            setOnCheckedChangeListener { _, checked -> repo.entryGuideEnabled = checked }
-        })
-        c.addView(guideRow, lp(MATCH, WRAP))
-        c.addView(divider(), lp(MATCH, 1.dp))
-
-        val streakRow = LinearLayout(this@MainActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = 72.dp
+        val intervalTexts = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        intervalTexts.addView(label("연속 시청 알림", 15f, P.INK, W.MEDIUM))
+        intervalTexts.addView(label("이어서 이만큼 보면 알려 줘요", 12f, P.SUB), lp(WRAP, WRAP, top = 4))
+        intervalRow.addView(intervalTexts, LinearLayout.LayoutParams(0, WRAP, 1f))
+        intervalValue = label("", 15f, P.INK, W.MEDIUM, tabular = true).apply { gravity = Gravity.CENTER }
+        fun stepInterval(dir: Int) {
+            val opts = UsageRepository.CONTINUOUS_OPTIONS
+            val i = opts.indexOfFirst { it >= repo.continuousAlertMinutes }.coerceAtLeast(0)
+            repo.continuousAlertMinutes = opts[(i + dir).coerceIn(0, opts.size - 1)]
+            refresh()
         }
-        val streakTexts = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        streakTexts.addView(label("연속일수 화면", 15f, P.INK, W.MEDIUM))
-        streakTexts.addView(label("하루 처음 열 때 연속일수를 크게 보여줘요", 12f, P.SUB), lp(WRAP, WRAP, top = 4))
-        streakRow.addView(streakTexts, LinearLayout.LayoutParams(0, WRAP, 1f))
-        streakRow.addView(Switch(this@MainActivity).apply {
-            isChecked = uiPrefs.getBoolean(PREF_STREAK_SCREEN, true)
-            contentDescription = "연속일수 화면"
-            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            thumbTintList = ColorStateList(states, intArrayOf(P.INK, Color.WHITE))
-            trackTintList = ColorStateList(states, intArrayOf(P.INK, Color.rgb(170, 162, 154)))
-            setOnCheckedChangeListener { _, checked -> uiPrefs.edit().putBoolean(PREF_STREAK_SCREEN, checked).apply() }
-        })
-        c.addView(streakRow, lp(MATCH, WRAP))
-        c.addView(divider(), lp(MATCH, 1.dp))
-
-        nameValue = label("", 15f, P.SUB)
-        c.addView(linkRow("캐릭터 이름", nameValue) { showRename() })
+        intervalRow.addView(btn("−", BtnStyle.OUTLINE, 16f) { stepInterval(-1) }.apply { contentDescription = "주기 줄이기" }, LinearLayout.LayoutParams(40.dp, 40.dp))
+        intervalRow.addView(intervalValue, LinearLayout.LayoutParams(56.dp, WRAP))
+        intervalRow.addView(btn("+", BtnStyle.OUTLINE, 16f) { stepInterval(1) }.apply { contentDescription = "주기 늘리기" }, LinearLayout.LayoutParams(40.dp, 40.dp))
+        c.addView(intervalRow, lp(MATCH, WRAP))
         addView(c)
+
+        // 약속 시간표 (최대 3개)
+        val slots = card(padV = 12)
+        slots.addView(label("약속 시간표", 15f, P.INK, W.MEDIUM), lp(MATCH, WRAP, top = 8))
+        slots.addView(label("이 시간에 숏폼을 켜면 3초 안내 화면이 떠요 · 최대 ${UsageRepository.MAX_SLOTS}개", 12f, P.SUB), lp(MATCH, WRAP, top = 4))
+        slotList = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        slots.addView(slotList, lp(MATCH, WRAP, top = 4))
+        addView(slots)
+
+        addView(label("안내", 13f, P.SUB, W.MEDIUM).apply { setPadding(4.dp, 12.dp, 4.dp, 8.dp) })
+        val toggles = card(padV = 4)
+        toggles.addView(switchRow("진입 안내 화면", "목표를 넘긴 뒤나 시간표 시간에 숏폼을 켜면 3초 동안 보여줘요", repo.entryGuideEnabled) { repo.entryGuideEnabled = it })
+        toggles.addView(divider(), lp(MATCH, 1.dp))
+        toggles.addView(switchRow("아침 집중 쪽지", "오전 9시에 오늘 할 일을 한 번 알려 줘요", repo.morningNoteEnabled) { repo.morningNoteEnabled = it })
+        toggles.addView(divider(), lp(MATCH, 1.dp))
+        toggles.addView(switchRow("빼꼼 모찌", "숏폼을 오래 볼 때 화면 끝에서 모찌가 시간을 알려 줘요", repo.peekEnabled) { repo.peekEnabled = it })
+        toggles.addView(divider(), lp(MATCH, 1.dp))
+        toggles.addView(switchRow("홈 화면 산책", "홈 화면에서도 빼꼼 모찌가 보여요", repo.homeWalkEnabled) { repo.homeWalkEnabled = it })
+        toggles.addView(divider(), lp(MATCH, 1.dp))
+        toggles.addView(switchRow("연속일수 화면", "하루 처음 열 때 연속일수를 크게 보여줘요", repo.streakScreenEnabled) { repo.streakScreenEnabled = it })
+        toggles.addView(divider(), lp(MATCH, 1.dp))
+        toggles.addView(switchRow("행복도에 따라 앱 아이콘 바꾸기", "앱을 닫으면 홈 화면 아이콘이 모찌 표정으로 바뀌어요", repo.dynamicIconEnabled) { repo.dynamicIconEnabled = it })
+        addView(toggles)
 
         addView(label("권한", 13f, P.SUB, W.MEDIUM).apply { setPadding(4.dp, 12.dp, 4.dp, 8.dp) })
         val perms = card(padV = 4)
@@ -682,6 +747,16 @@ class MainActivity : Activity() {
         perms.addView(linkRow("배터리 최적화 제외", battStatus) { openBattery() })
         addView(perms)
 
+        addView(label("기타", 13f, P.SUB, W.MEDIUM).apply { setPadding(4.dp, 12.dp, 4.dp, 8.dp) })
+        val etc = card(padV = 4)
+        etc.addView(linkRow("홈 화면에 위젯 추가", label("2×2", 14f, P.SUB)) { addWidget() })
+        etc.addView(divider(), lp(MATCH, 1.dp))
+        etc.addView(linkRow("앱 사용 설명서 다시 보기", label("", 14f, P.SUB)) { showManual() })
+        etc.addView(divider(), lp(MATCH, 1.dp))
+        nameValue = label("", 15f, P.SUB)
+        etc.addView(linkRow("캐릭터 이름", nameValue) { showRename() })
+        addView(etc)
+
         if (DevTools.isDebugBuild(this@MainActivity)) {
             addView(label("개발자 테스트", 13f, P.SUB, W.MEDIUM).apply { setPadding(4.dp, 12.dp, 4.dp, 8.dp) })
             addView(buildDevCard())
@@ -690,6 +765,128 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, 16.dp, 0, 0)
         })
+    }
+
+    /** 설명 두 줄 + 오른쪽 스위치 (기존 진입 안내·연속일수 화면 행과 같은 모양) */
+    private fun switchRow(title: String, desc: String, checked: Boolean, onChange: (Boolean) -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = 72.dp
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(label(title, 15f, P.INK, W.MEDIUM))
+        texts.addView(label(desc, 12f, P.SUB), lp(WRAP, WRAP, top = 4))
+        row.addView(texts, LinearLayout.LayoutParams(0, WRAP, 1f).apply { marginEnd = 12.dp })
+        row.addView(Switch(this).apply {
+            isChecked = checked
+            contentDescription = title
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(states, intArrayOf(P.INK, Color.WHITE))
+            trackTintList = ColorStateList(states, intArrayOf(P.INK, Color.rgb(170, 162, 154)))
+            setOnCheckedChangeListener { _, on -> onChange(on) }
+        })
+        return row
+    }
+
+    private fun renderSlots() {
+        val list = repo.scheduleSlots()
+        val sig = list.joinToString(",") { it.encode() }
+        if (sig == slotSignature && slotList.childCount > 0) return
+        slotSignature = sig
+        slotList.removeAllViews()
+        list.forEachIndexed { i, slot ->
+            if (i > 0) slotList.addView(divider(), lp(MATCH, 1.dp))
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = 52.dp
+            }
+            row.addView(label(slot.label(), 15f, P.INK, tabular = true), LinearLayout.LayoutParams(0, WRAP, 1f))
+            row.addView(btn("삭제", BtnStyle.QUIET, 13f) {
+                repo.removeScheduleSlot(i)
+                refresh()
+            }, LinearLayout.LayoutParams(WRAP, 36.dp))
+            slotList.addView(row)
+        }
+        if (list.size < UsageRepository.MAX_SLOTS) {
+            if (list.isNotEmpty()) slotList.addView(divider(), lp(MATCH, 1.dp))
+            slotList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                background = pressable(roundRect(Color.TRANSPARENT, 8.dp.toFloat()), 8.dp.toFloat())
+                setOnClickListener { showAddSlot() }
+                addView(label("+", 20f, P.SUB).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(24.dp, WRAP).apply { marginEnd = 12.dp })
+                addView(label("시간 추가", 15f, P.SUB))
+            }, lp(MATCH, 52.dp))
+        }
+    }
+
+    /** 시작·끝 시각을 30분 단위로 고르는 시트 */
+    private fun showAddSlot() {
+        var start = 21 * 60
+        var end = 23 * 60
+        Sheet.custom(
+            this,
+            title = "약속 시간 추가",
+            primary = Sheet.Action("추가") {
+                if (start != end) repo.addScheduleSlot(ScheduleSlot(start, end))
+                refresh()
+            },
+        ) { _ ->
+            addView(label("이 시간에 숏폼을 켜면 모찌가 3초 동안 알려 줘요", 14f, P.SUB), lp(MATCH, WRAP))
+            fun stepper(name: String, get: () -> Int, set: (Int) -> Unit): View {
+                val row = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    minimumHeight = 64.dp
+                }
+                row.addView(label(name, 15f, P.INK, W.MEDIUM), LinearLayout.LayoutParams(0, WRAP, 1f))
+                val value = label("", 17f, P.INK, W.MEDIUM, tabular = true).apply { gravity = Gravity.CENTER }
+                fun show() { value.text = "%d:%02d".format(get() / 60, get() % 60) }
+                row.addView(btn("−", BtnStyle.OUTLINE, 16f) { set(Math.floorMod(get() - 30, 1440)); show() }, LinearLayout.LayoutParams(44.dp, 44.dp))
+                row.addView(value, LinearLayout.LayoutParams(72.dp, WRAP))
+                row.addView(btn("+", BtnStyle.OUTLINE, 16f) { set(Math.floorMod(get() + 30, 1440)); show() }, LinearLayout.LayoutParams(44.dp, 44.dp))
+                show()
+                return row
+            }
+            addView(stepper("시작", { start }, { start = it }), lp(MATCH, WRAP, top = 12))
+            addView(divider(), lp(MATCH, 1.dp))
+            addView(stepper("끝", { end }, { end = it }), lp(MATCH, WRAP))
+        }
+    }
+
+    private fun addWidget() {
+        val manager = getSystemService(android.appwidget.AppWidgetManager::class.java)
+        val ok = try {
+            manager != null && manager.isRequestPinAppWidgetSupported &&
+                manager.requestPinAppWidget(ComponentName(this, MochiWidgetProvider::class.java), null, null)
+        } catch (e: Exception) {
+            false
+        }
+        if (!ok) Toast.makeText(this, Lines.TOAST_WIDGET_UNSUPPORTED, Toast.LENGTH_LONG).show()
+    }
+
+    private fun showManual() {
+        OnboardingManualSheet.show(
+            this,
+            accessibilityOn = isAccessibilityEnabled(),
+            onClose = { repo.manualSeen = true },
+            onStart = {
+                repo.manualSeen = true
+                if (!isAccessibilityEnabled()) openAccessibility()
+            },
+        )
+    }
+
+    /** 오늘 성장했으면 그날 처음 열었을 때 한 번만 성장 모션 */
+    private fun maybePlayEvolution() {
+        if (isFinishing || !repo.consentAccepted) return
+        val stage = pet.takePendingEvolution() ?: return
+        selectTab(TAB_MOCHI)
+        world.celebrate()
+        world.say(if (stage == PetStage.BABY) Lines.HATCHED else Lines.evolved(stage.label), 5_000)
     }
 
     /** 디버그 빌드에서만 보이는 개발자 테스트 메뉴 */
@@ -704,7 +901,7 @@ class MainActivity : Activity() {
 
         c.addView(label("가짜 시청 시간 넣기", 12f, P.SUB, W.MEDIUM), lp(MATCH, WRAP, top = 16))
         val adds = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val apps = listOf(ShortFormApp.YOUTUBE_SHORTS to "쇼츠", ShortFormApp.INSTAGRAM_REELS to "릴스", ShortFormApp.TIKTOK to "틱톡")
+        val apps = listOf(ShortFormApp.YOUTUBE_SHORTS to "쇼츠", ShortFormApp.INSTAGRAM_REELS to "릴스")
         apps.forEachIndexed { i, (app, name) ->
             adds.addView(
                 btn("$name +10분", BtnStyle.OUTLINE, 14f) {
@@ -727,7 +924,7 @@ class MainActivity : Activity() {
         c.addView(
             btn("하루 넘기기 (다음 날 새벽 5시 정산)", BtnStyle.PRIMARY, 14f) {
                 val results = DevTools.skipToNextDay(this, tracked = true)
-                showTempSpeech(results.lastOrNull()?.message ?: Lines.DEV_NOTHING_TO_SETTLE)
+                world.say(results.lastOrNull()?.message ?: Lines.DEV_NOTHING_TO_SETTLE, 6_000)
                 afterDevChange()
             },
             lp(MATCH, 44.dp, top = 8),
@@ -735,7 +932,7 @@ class MainActivity : Activity() {
         c.addView(
             btn("측정 안 된 날로 하루 넘기기", BtnStyle.OUTLINE, 14f) {
                 val results = DevTools.skipToNextDay(this, tracked = false)
-                showTempSpeech(results.lastOrNull()?.message ?: Lines.DEV_UNTRACKED_SKIPPED)
+                world.say(results.lastOrNull()?.message ?: Lines.DEV_UNTRACKED_SKIPPED, 6_000)
                 afterDevChange()
             },
             lp(MATCH, 44.dp, top = 8),
@@ -748,7 +945,7 @@ class MainActivity : Activity() {
                     message = "시청 기록, 캐릭터, 공부 기록을 모두 지우고 실제 시각으로 돌아가요. 설정(목표, 동의)은 남아요.",
                     primary = Sheet.Action("초기화", destructive = true) {
                         DevTools.resetAll(this)
-                        showTempSpeech(Lines.DEV_RESET)
+                        world.say(Lines.DEV_RESET)
                         afterDevChange()
                     },
                 )
@@ -761,7 +958,7 @@ class MainActivity : Activity() {
     /** 오늘(새벽 5시 기준) 아직 안 보여 줬고, 이어 가는 중이거나 기록이 있었던 사람에게만 */
     private fun maybeShowStreak() {
         if (isFinishing || !repo.consentAccepted) return
-        if (!uiPrefs.getBoolean(PREF_STREAK_SCREEN, true)) return
+        if (!repo.streakScreenEnabled) return
         val today = DayClock.logicalDay().toString()
         if (uiPrefs.getString(PREF_STREAK_SHOWN_DAY, null) == today) return
         val state = pet.state()
@@ -818,8 +1015,9 @@ class MainActivity : Activity() {
         info.text = listOf(
             "앱이 보는 시각: ${zoned.monthValue}/${zoned.dayOfMonth} %02d:%02d ($shiftLabel)".format(zoned.hour, zoned.minute),
             "기록 날짜(새벽 5시 기준): $today · 측정됨: ${if (repo.isTracked(today)) "예" else "아니오"}",
-            "오늘 반영 시청 %.1f분 → 지금 정산하면 경험치 +%d".format(counted, PetEngine.score(counted) / if (state.health < 30) 2 else 1),
-            "경험치 ${state.exp} (${state.stage.label}) · 체력 ${state.health} · 연속 ${state.streak}일 · 보호권 ${state.shields}",
+            "순수 시청 t %.1f분 · 목표 G %d분 → 지금 정산하면 경험치 +%d".format(counted, state.goalMinutes, state.expectedGain),
+            "경험치 ${state.exp} (${state.stage.label}) · 행복 ${state.happiness} (${state.mood.label}) · 쓰다듬기 남음 ${state.petsLeft} · 아이콘 ${AppIconSwitcher.currentBucket(this)}단계",
+            "연속 ${state.streak}일 · 보호권 ${state.shields}",
             "감지 원본: 앞 화면=${ShortFormAccessibilityService.lastForegroundPackage ?: "-"} · 숏폼=${ShortFormAccessibilityService.currentApp?.name ?: "-"}",
             "오늘 알림: 누적 ${repo.count(today, SyncManager.COUNT_ALERT_CUMULATIVE)}회(마지막 ${repo.lastAlertMinutes(today)}분 기준) · 연속 ${repo.count(today, SyncManager.COUNT_ALERT_CONTINUOUS)}회 · 알림 권한 ${if (Notifier.canNotify(this)) "있음" else "없음"}",
             "측정 서비스가 켜져 있던 시간: ${formatDuration(repo.trackedMillis(today))} (1분마다 저장)",
@@ -848,8 +1046,8 @@ class MainActivity : Activity() {
         // 공부 모드: 끝난 세션 완료 처리, 세션 중 접근성 서비스가 꺼졌으면 실패 처리
         for (event in study.sync(now)) {
             if (event is StudyEvent.SessionCompleted) {
-                showTempSpeech(Lines.sessionDone(event.couponMinutes, event.shieldGranted))
-                petView.pet()
+                world.say(Lines.sessionDone(event.sessionMinutes, event.couponMinutes, event.shieldGranted))
+                world.react()
             }
         }
         if (!accOn && study.sessionActive(now) && study.failSession(now)) {
@@ -861,54 +1059,53 @@ class MainActivity : Activity() {
         val state = pet.state()
         val today = DayClock.logicalDay(now)
 
-        // 캐릭터
+        // 모찌 탭 HUD
         petName.text = state.name
         petName.contentDescription = "${state.name}, 눌러서 이름 바꾸기"
-        petStage.text = "${state.stage.label} 단계 · 기분 ${state.mood.label}"
-        streakText.text = "${state.streak}"
+        petStage.text = "${state.stage.label} · ${state.mood.label}"
+        streakText.text = Lines.streakChip(state.streak)
         streakText.setTextColor(if (state.streak > 0) P.FLAME_TEXT else P.MUTED)
         streakIcon.color = if (state.streak > 0) P.FLAME else P.MUTED
         (streakText.parent as View).contentDescription = "연속 ${state.streak}일, 눌러서 자세히"
-        petView.stage = state.stage
-        petView.mood = state.mood
-        // 밤 12시~새벽 5시엔 졸린 눈
-        petView.sleepy = DayClock.isLateNight(now)
-        petView.stageProgress = state.stageProgress
-        petView.accessoryLevel = state.accessoryLevel
+        world.scene = state.scene
+        // 지금이 방이면 들판 아이콘(누르면 들판으로), 들판이면 집 아이콘
+        sceneIcon.kind = if (state.scene == 0) LineIcon.Kind.FIELD else LineIcon.Kind.HOUSE
+        (sceneIcon.parent as View).contentDescription = if (state.scene == 0) "들판으로 나가기" else "방 안으로 들어가기"
+        world.setPet(state)
+        world.idleText = if (world.aiming) Lines.FEED_AIM else Lines.idle(state.mood, state.stage, focusing = sessionOn)
         val uptime = SystemClock.uptimeMillis()
-        speech.text = if (tempSpeech != null && uptime < tempSpeechUntil) tempSpeech else Lines.idle(state.mood, state.stage, focusing = study.sessionActive(now))
-        petHint.visibility = if (uiPrefs.getBoolean("petted", false)) View.GONE else View.VISIBLE
-        hpText.text = "${state.health} / 100"
-        hpBar.progress = state.health * 10
-        val next = state.stage.next
-        if (next != null) {
-            expText.text = "${state.exp} / ${next.minExp}"
-            expNote.text = "${next.label}까지 ${next.minExp - state.exp} · 내일 새벽 정산 예상 +${state.moodScore}"
+        if (state.isEgg) {
+            hpText.text = Lines.HATCHING
+            hpBar.progress = 1000
         } else {
-            expText.text = "${state.exp}"
-            expNote.text = "다 자랐어요"
+            hpText.text = Lines.happiness(state.happiness)
+            hpBar.progress = state.happiness * 10
         }
-        // 숫자(지금 경험치 / 다음 단계 기준)와 막대가 같은 비율을 보이도록 전체 기준으로 채웁니다.
-        expBar.progress = if (next != null) (state.exp * 1000 / next.minExp).coerceIn(0, 1000) else 1000
-        val overGoal = state.todayMinutes > state.goalMinutes
+        setBarColor(hpBar, if (!state.isEgg && state.happiness < 20) P.OVER else P.ACCENT)
+        val next = state.stage.next
+        expText.text = if (next != null) Lines.expTotal(state.exp, next.minExp) else Lines.expDone(state.exp)
+        expNote.text = if (next != null) Lines.expToday(state.expectedGain) else ""
+        // 숫자(누적 경험치 / 다음 단계 기준)와 막대가 같은 비율
+        expBar.progress = (state.expProgress * 1000).toInt()
+        petHint.text = if (state.isEgg) Lines.NOTE_EGG else Lines.petHint(state.petsLeft)
         feedButton.text = when {
-            state.fedToday -> Lines.FEED_DONE
-            overGoal -> Lines.FEED_BLOCKED
-            else -> Lines.FEED
+            world.aiming -> Lines.THROW_CANCEL
+            state.fedToday -> Lines.THROW_DONE
+            else -> Lines.THROW
         }
-        setUsable(feedButton, !state.fedToday && !overGoal)
+        setUsable(feedButton, world.aiming || (!state.fedToday && !state.isEgg))
         val snacks = state.snacksAvailable
         snackButton.text = if (snacks > 0) Lines.snack(snacks) else Lines.SNACK_EMPTY
-        setUsable(snackButton, snacks > 0)
-        val notes = listOfNotNull(
-            when {
-                state.fedToday -> Lines.NOTE_FED
-                overGoal -> Lines.NOTE_OVER_GOAL
-                else -> null
-            },
-            if (snacks == 0) Lines.NOTE_NO_SNACK else null,
-        )
-        petNote.text = notes.joinToString(" · ")
+        setUsable(snackButton, snacks > 0 && !state.isEgg)
+        val notes = when {
+            world.aiming -> listOf(Lines.NOTE_AIM)
+            state.isEgg -> emptyList()
+            else -> listOfNotNull(
+                if (state.fedToday) Lines.NOTE_FED else null,
+                if (snacks == 0) Lines.NOTE_NO_SNACK else null,
+            )
+        }
+        petNote.text = notes.joinToString("\n")
         petNote.visibility = if (notes.isEmpty()) View.GONE else View.VISIBLE
         Notifier.updateFocus(this)
 
@@ -940,7 +1137,7 @@ class MainActivity : Activity() {
             watching != null -> P.OVER to "지금 ${shortAppName(watching)} 시간을 재고 있어요"
             else -> {
                 val fg = ShortFormApp.fromPackage(ShortFormAccessibilityService.lastForegroundPackage)
-                if (fg != null && fg != ShortFormApp.TIKTOK) P.GOOD to "${fg.label.split(" ").first()} 사용 중 · 숏폼 화면이 아니라 안 재요"
+                if (fg != null) P.GOOD to "${fg.label.split(" ").first()} 사용 중 · 숏폼 화면이 아니라 안 재요"
                 else P.GOOD to "측정 중 · 지금은 숏폼을 보고 있지 않아요"
             }
         }
@@ -953,27 +1150,14 @@ class MainActivity : Activity() {
         // 공부
         val todos = study.todos(now)
         val doneCount = todos.count { it.done }
-        studySub.text = if (todos.isEmpty()) "" else "할 일 $doneCount / ${todos.size} 완료"
-        if (sessionOn) {
-            shortcutTitle.text = "집중하는 중"
-            shortcutValue.text = "${formatClock(study.sessionRemainingMs(now))} 남음"
-        } else {
-            val nextTodo = todos.firstOrNull { !it.done }
-            shortcutTitle.text = when {
-                todos.isEmpty() -> "오늘 할 일 적기"
-                nextTodo != null -> nextTodo.text
-                else -> "오늘 할 일을 다 했어요"
-            }
-            shortcutValue.text = if (todos.isEmpty()) "끝낼 때마다 간식이 생겨요" else "할 일 $doneCount / ${todos.size} 완료 · ${repo.sessionMinutes}분 집중"
-        }
         renderTodos(todos, sessionOn)
         idleSession.visibility = if (sessionOn) View.GONE else View.VISIBLE
         activeSession.visibility = if (sessionOn) View.VISIBLE else View.GONE
         if (sessionOn) {
             sessionClock.text = formatClock(study.sessionRemainingMs(now))
         } else {
-            lengthPicker.select(if (repo.sessionMinutes == 50) 1 else 0)
-            sessionButton.text = "${repo.sessionMinutes}분 집중 시작"
+            lengthPicker.select(UsageRepository.SESSION_LENGTHS.indexOf(repo.sessionMinutes).coerceAtLeast(0))
+            sessionButton.text = if (repo.sessionMinutes == 5) "5분만 시작하기" else "${repo.sessionMinutes}분 집중 시작"
         }
         val couponLeft = study.couponRemainingMs(now)
         couponSub.text = when {
@@ -995,8 +1179,14 @@ class MainActivity : Activity() {
             bestStreak = state.bestStreak
             lastWeekRender = 0L
         }
-        goalPicker.select(((goal - UsageRepository.GOAL_MIN) / 30).coerceIn(0, 3))
+        goalPicker.select(UsageRepository.GOAL_OPTIONS.indexOf(repo.dailyGoalMinutes).coerceAtLeast(0))
+        intervalValue.text = "${repo.continuousAlertMinutes}분"
+        renderSlots()
         nameValue.text = state.name
+        if (uptime - lastWidgetPush > 30_000) {
+            lastWidgetPush = uptime
+            MochiWidgetProvider.update(this)
+        }
         reportText.text = state.lastReport ?: "아직 정산 기록이 없어요. 내일 새벽 5시에 첫 정산을 해요."
 
         refreshDevInfo(now, state)
@@ -1034,7 +1224,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         checked = true
                         if (study.completeTodo(index)) {
-                            showTempSpeech(Lines.todoDone(todo.text))
+                            world.say(Lines.todoDone(todo.text))
                             undoIndex = index
                             undoUntil = SystemClock.uptimeMillis() + 5_000
                         }
@@ -1094,6 +1284,29 @@ class MainActivity : Activity() {
             val best = if (bestStreak > 0) " 가장 길게 이어 간 건 ${bestStreak}일이에요." else ""
             "하루에 평균 $avg 봤고, 기록이 있는 ${tracked.size}일 중 ${kept}일은 목표를 지켰어요.$best"
         }
+
+        // 연속일수 주간 스탬프 (연속일수 화면과 같은 표시)
+        stampRow.removeAllViews()
+        for (day in days) {
+            val mark = when {
+                day == today -> StreakScreen.Mark.TODAY
+                !repo.isTracked(day) -> StreakScreen.Mark.NONE
+                repo.countedMillis(day) / 60_000 <= repo.goalFor(day) -> StreakScreen.Mark.KEPT
+                else -> StreakScreen.Mark.OVER
+            }
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+            col.addView(StreakScreen.DayDot(this, mark), LinearLayout.LayoutParams(28.dp, 28.dp))
+            col.addView(
+                label(if (day == today) Lines.STREAK_TODAY else day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN), 12f, P.SUB),
+                lp(WRAP, WRAP, top = 6),
+            )
+            stampRow.addView(col, LinearLayout.LayoutParams(0, WRAP, 1f))
+        }
+        val s = pet.state()
+        stampNote.text = if (s.streak > 0) "지금 ${s.streak}일 연속 · 최고 ${s.bestStreak}일" else if (s.bestStreak > 0) "최고 기록 ${s.bestStreak}일 · 오늘 목표 안으로 보면 다시 1일" else "목표 안으로 본 날이 이어지면 불꽃이 켜져요"
     }
 
     // ------------------------------------------------------------------ 동작
@@ -1116,27 +1329,21 @@ class MainActivity : Activity() {
         }
     }
 
+    /** 쓰다듬기: 시간대마다 3번까지 행복 +5, 그 뒤에도 반응은 그대로 */
     private fun onPetTapped() {
-        petView.pet()
         // 3초 안에 다시 누르면 연달아 누른 것으로 셉니다.
         val nowUp = SystemClock.uptimeMillis()
         petTaps = if (nowUp - lastPetTap < 3_000) petTaps + 1 else 1
         lastPetTap = nowUp
-        showTempSpeech(Lines.petReply(pet.state().mood, petTaps))
-        if (!uiPrefs.getBoolean("petted", false)) {
-            uiPrefs.edit().putBoolean("petted", true).apply()
-            petHint.visibility = View.GONE
-        }
+        val gain = pet.pet()
+        val state = pet.state()
+        world.say(Lines.petReply(state.mood, petTaps, state.stage))
+        if (gain > 0) world.floatText("+$gain")
+        refresh()
     }
 
     private var petTaps = 0
     private var lastPetTap = 0L
-
-    private fun showTempSpeech(message: String) {
-        tempSpeech = message
-        tempSpeechUntil = SystemClock.uptimeMillis() + 4000
-        speech.text = message
-    }
 
     private fun onSessionButton() {
         if (study.sessionActive()) {
@@ -1146,7 +1353,7 @@ class MainActivity : Activity() {
                 message = "그만두면 차단이 풀리고 이번 집중은 실패로 남아요. 휴식 쿠폰도 받지 못해요.",
                 primary = Sheet.Action("그만두기", destructive = true) {
                     study.failSession()
-                    showTempSpeech(Lines.SESSION_QUIT)
+                    world.say(Lines.SESSION_QUIT)
                     refresh()
                 },
                 secondaryLabel = "계속하기",
@@ -1165,10 +1372,10 @@ class MainActivity : Activity() {
         Sheet.confirm(
             this,
             title = if (todoText != null) "'$todoText' ${minutes}분 집중" else "${minutes}분 집중",
-            message = "${minutes}분 동안 쇼츠·릴스·틱톡을 막아요. 일반 유튜브 영상과 인스타그램 피드는 쓸 수 있어요.\n" +
-                "끝까지 하면 휴식 쿠폰 ${if (minutes == 50) 10 else 5}분을 받아요.",
+            message = "${minutes}분 동안 인스타그램은 잠기고, 유튜브는 과제에 필요한 영상인지 물어본 뒤 일반 영상만 열어 둬요. 쇼츠는 끝까지 막아요.\n" +
+                if (minutes == 5) "5분은 시작을 돕는 용도라 쿠폰은 없어요." else "끝까지 하면 휴식 쿠폰 ${StudyManager.couponFor(minutes)}분을 받아요.",
             primary = Sheet.Action("시작") {
-                if (study.startSession(minutes)) showTempSpeech(Lines.sessionStart(minutes))
+                if (study.startSession(minutes)) world.say(Lines.sessionStart(minutes))
                 refresh()
             },
         )
@@ -1255,15 +1462,19 @@ class MainActivity : Activity() {
         Sheet.confirm(
             this,
             title = "시작하기 전에",
-            message = "숏폼펫은 접근성 서비스로 유튜브·인스타그램·틱톡 화면이 쇼츠·릴스 화면인지 확인하고 그 시간을 기록합니다. " +
-                "공부 세션을 직접 시작했을 때만 그 화면에서 빠져나오게 합니다.\n\n" +
+            message = "숏폼펫은 접근성 서비스로 유튜브·인스타그램 화면이 쇼츠·릴스 화면인지 확인하고 그 시간을 기록합니다. " +
+                "집중 세션을 직접 시작했을 때만 인스타그램을 닫고, 유튜브는 과제용인지 물어본 뒤 쇼츠를 막습니다.\n\n" +
                 "기록은 이 기기에 먼저 저장하고, 서비스 개선을 위해 하루 1번 아래 항목을 서버(Firebase)로 보냅니다.\n" +
                 "• 무작위 익명 ID, 날짜, 앱별 시청 시간, 측정 시간, 알림 횟수\n" +
                 "• 앱·기기·안드로이드 버전, 유튜브·인스타그램 앱 버전\n" +
-                "• 하루 목표, 캐릭터 단계·체력, 앱 실행 횟수, 공부 모드 횟수 기록, 연속일수\n\n" +
+                "• 하루 목표, 캐릭터 단계·행복도, 앱 실행 횟수, 공부 모드 횟수 기록, 연속일수\n\n" +
                 "보내지 않는 것: 화면 내용, 영상 제목, 계정, 캐릭터 이름, 할 일 내용, 위치·연락처.\n" +
                 "언제든 접근성 설정에서 끄거나 앱을 삭제할 수 있습니다.",
-            primary = Sheet.Action("동의하고 시작") { repo.consentAccepted = true },
+            primary = Sheet.Action("동의하고 시작") {
+                repo.consentAccepted = true
+                // 동의 직후 사용 설명서
+                if (!repo.manualSeen) handler.postDelayed({ showManual() }, 250)
+            },
             secondaryLabel = "나가기",
             onSecondary = { finish() },
             cancelable = false,
@@ -1312,6 +1523,13 @@ class MainActivity : Activity() {
         view.setTextColor(if (on) P.SUB else P.OVER_TEXT)
     }
 
+    /** 왼쪽 값 글자, 오른쪽 보조 글자 (모찌 HUD) */
+    private fun statRow(left: TextView, right: TextView?) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        addView(left, LinearLayout.LayoutParams(0, WRAP, 1f))
+        if (right != null) addView(right)
+    }
+
     private fun statRow(name: String, value: TextView) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         addView(label(name, 13f, P.SUB), LinearLayout.LayoutParams(0, WRAP, 1f))
@@ -1321,7 +1539,6 @@ class MainActivity : Activity() {
     private fun shortAppName(app: ShortFormApp) = when (app) {
         ShortFormApp.YOUTUBE_SHORTS -> "쇼츠"
         ShortFormApp.INSTAGRAM_REELS -> "릴스"
-        ShortFormApp.TIKTOK -> "틱톡"
     }
 
     private fun appVersion(): String = try {
@@ -1368,10 +1585,12 @@ class MainActivity : Activity() {
         private const val WRAP = LinearLayout.LayoutParams.WRAP_CONTENT
         private const val KEY_TAB = "tab"
         const val EXTRA_TAB = "tab"
-        private const val PREF_STREAK_SCREEN = "streak_screen"
         private const val PREF_STREAK_SHOWN_DAY = "streak_shown_day"
-        const val TAB_TODAY = 0
-        const val TAB_STUDY = 1
+        const val TAB_MOCHI = 0
+        const val TAB_TODAY = 1
+
+        /** 앱 화면이 보이는 중인지 (아이콘 바꾸기는 뒤로 내려간 뒤에만) */
+        @Volatile var inForeground = false
         private const val TAB_RECORD = 2
         private const val TAB_SETTINGS = 3
     }
