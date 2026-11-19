@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ShortFormPet" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#17191A</item>
+        <item name="android:colorPrimaryDark">#F3F4F1</item>
+        <item name="android:colorAccent">#17191A</item>
+        <item name="android:statusBarColor">#F3F4F1</item>
+        <item name="android:navigationBarColor">#F3F4F1</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+    <color name="bg">#F3F4F1</color>
+    <color name="launcher_bg">#FFE0D2</color>
+</resources>

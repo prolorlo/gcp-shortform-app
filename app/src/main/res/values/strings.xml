@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">숏폼펫</string>
+    <string name="accessibility_label">숏폼펫 시청 시간 측정</string>
+    <string name="accessibility_description">유튜브 쇼츠, 인스타그램 릴스, 틱톡 화면이 열려 있는 시간을 측정합니다. 직접 시작한 공부 세션 중에는 쇼츠·릴스 화면에서 뒤로 가기를 실행하고 틱톡은 홈 화면으로 보냅니다. 목표를 넘긴 뒤 숏폼을 켜면 3초 동안 안내 화면을 보여줍니다. 화면의 글자나 영상 정보는 읽거나 저장하지 않고, 화면 구성 요소의 ID로 쇼츠·릴스 화면인지만 판별합니다.</string>
+</resources>
