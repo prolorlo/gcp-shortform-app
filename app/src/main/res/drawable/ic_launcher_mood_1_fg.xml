@@ -1,9 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 앱 아이콘 전경 1단계 (행복도 표정). AppIconSwitcher 참고 -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-<path android:fillColor="#FFFFFFFF" android:strokeColor="#FF17191A" android:strokeWidth="2.6" android:pathData="M30,59a24,20.5 0,1 0,48 0a24,20.5 0,1 0,-48 0z" />
-<path android:fillColor="#AA78A050" android:pathData="M39,69a1.6,1.6 0,1 0,3.2 0a1.6,1.6 0,1 0,-3.2 0zM68,66a1.3,1.3 0,1 0,2.6 0a1.3,1.3 0,1 0,-2.6 0z" />
-<path android:fillColor="#99F49880" android:pathData="M36.5,61a4,2.6 0,1 0,8 0a4,2.6 0,1 0,-8 0zM63.5,61a4,2.6 0,1 0,8 0a4,2.6 0,1 0,-8 0z" />
-<path android:strokeColor="#FF17191A" android:strokeWidth="2.6" android:strokeLineCap="round" android:fillColor="#00000000" android:pathData="M41,56Q45,50.5 49,56M59,56Q63,50.5 67,56" />
-<path android:fillColor="#FFC45A5A" android:strokeColor="#FF17191A" android:strokeWidth="2.2" android:strokeLineJoin="round" android:pathData="M48.5,61.5Q54,70 59.5,61.5Z" />
+<!--
+    앱 아이콘 전경 1단계 (행복도 100~70 · 활짝 웃음). 기본 아이콘(ic_launcher)도 이 그림을 씁니다.
+    모찌 '어린이' 단계 + '기분 좋음' 표정을 MochiPainter와 같은 비율(1u = 0.84)로 그렸습니다.
+    순서: 발 → 귀 → 팔 → 몸 → 볼 → 눈 → 입 (AppIconSwitcher 참고)
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 발 -->
+    <path
+        android:fillColor="#FFF8E5D8"
+        android:strokeColor="#FF2B2320"
+        android:strokeWidth="2.1"
+        android:pathData="M38.52,73.7a5.33,3.15 0,1 0,10.66 0a5.33,3.15 0,1 0,-10.66 0zM58.82,73.7a5.33,3.15 0,1 0,10.66 0a5.33,3.15 0,1 0,-10.66 0z" />
+
+    <!-- 귀 -->
+    <path
+        android:fillColor="#FFFFFDF7"
+        android:strokeColor="#FF2B2320"
+        android:strokeWidth="2.1"
+        android:pathData="M33.43,36.35a5.85,5.85 0,1 0,11.7 0a5.85,5.85 0,1 0,-11.7 0zM62.87,36.35a5.85,5.85 0,1 0,11.7 0a5.85,5.85 0,1 0,-11.7 0z" />
+    <path
+        android:fillColor="#FFF7C2B6"
+        android:pathData="M36.47,36.77a2.81,2.81 0,1 0,5.62 0a2.81,2.81 0,1 0,-5.62 0zM65.91,36.77a2.81,2.81 0,1 0,5.62 0a2.81,2.81 0,1 0,-5.62 0z" />
+
+    <!-- 짧은 찹쌀떡 팔 -->
+    <group
+        android:translateX="30.14"
+        android:translateY="54.8"
+        android:rotation="18">
+        <path
+            android:fillColor="#FFFFFDF7"
+            android:strokeColor="#FF2B2320"
+            android:strokeWidth="2.1"
+            android:pathData="M-8.6,0a4.82,3.36 0,1 0,9.64 0a4.82,3.36 0,1 0,-9.64 0z" />
+    </group>
+    <group
+        android:translateX="77.86"
+        android:translateY="54.8"
+        android:rotation="-18">
+        <path
+            android:fillColor="#FFFFFDF7"
+            android:strokeColor="#FF2B2320"
+            android:strokeWidth="2.1"
+            android:pathData="M-1.04,0a4.82,3.36 0,1 0,9.64 0a4.82,3.36 0,1 0,-9.64 0z" />
+    </group>
+
+    <!-- 동글동글한 몸 -->
+    <path
+        android:fillColor="#FFFFFDF7"
+        android:strokeColor="#FF2B2320"
+        android:strokeWidth="2.1"
+        android:strokeLineJoin="round"
+        android:pathData="M54,30.5C69.74,30.5 80.14,45.35 80.4,57.95C80.65,71.45 69.23,75.5 54,75.5C38.77,75.5 27.35,71.45 27.6,57.95C27.86,45.35 38.26,30.5 54,30.5Z" />
+
+    <!-- 볼 홍조 -->
+    <path
+        android:fillColor="#FFF59E8B"
+        android:pathData="M36.64,58.61a4.03,2.18 0,1 0,8.06 0a4.03,2.18 0,1 0,-8.06 0zM63.3,58.61a4.03,2.18 0,1 0,8.06 0a4.03,2.18 0,1 0,-8.06 0z" />
+
+    <!-- 눈 + 반짝임 -->
+    <path
+        android:fillColor="#FF2B2320"
+        android:pathData="M42.85,55.25a2.52,3.44 0,1 0,5.04 0a2.52,3.44 0,1 0,-5.04 0zM60.11,55.25a2.52,3.44 0,1 0,5.04 0a2.52,3.44 0,1 0,-5.04 0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M43.48,53.99a1.05,1.05 0,1 0,2.1 0a1.05,1.05 0,1 0,-2.1 0zM60.74,53.99a1.05,1.05 0,1 0,2.1 0a1.05,1.05 0,1 0,-2.1 0z" />
+
+    <!-- 웃는 입 (ω) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF2B2320"
+        android:strokeWidth="1.85"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M51.06,57.77Q52.53,59.87 54,58.19Q55.47,59.87 56.94,57.77" />
 </vector>
