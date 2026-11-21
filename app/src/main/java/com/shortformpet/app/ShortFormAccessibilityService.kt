@@ -425,7 +425,8 @@ class ShortFormAccessibilityService : AccessibilityService() {
     private fun updateHomeWalk(fg: String?) {
         val p = peek ?: return
         val onHome = fg != null && fg == launcherPackage
-        if (onHome && repo.peekEnabled && repo.homeWalkEnabled) {
+        // 홈 화면 산책은 '빼꼼 모찌'(숙폼 중 알림) 스위치와 따로 켭니다.
+        if (onHome && repo.homeWalkEnabled) {
             p.showHome(pet.state())
         } else if (p.mode == EdgePeekPetOverlay.Mode.HOME) {
             p.hide()

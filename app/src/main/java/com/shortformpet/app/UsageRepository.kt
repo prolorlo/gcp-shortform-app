@@ -183,6 +183,19 @@ class UsageRepository(private val stores: Stores) {
         get() = settings.getInt("peek_y_permille", 420) / 1000f
         set(value) = settings.edit { putInt("peek_y_permille", (value.coerceIn(0.1f, 0.85f) * 1000).toInt()) }
 
+    /** 홈 화면 산책 모찌: 구석에 숨은 쪽(-1 왼쪽, 1 오른쪽, 0 돌아다님) */
+    var homePeekSide: Int
+        get() = settings.getInt("home_peek_side", 0).coerceIn(-1, 1)
+        set(value) = settings.edit { putInt("home_peek_side", value.coerceIn(-1, 1)) }
+
+    /** 홈 화면 산책 모찌 위치(화면 너비·높이 비율) */
+    var homeX: Float
+        get() = settings.getInt("home_x_permille", 500) / 1000f
+        set(value) = settings.edit { putInt("home_x_permille", (value.coerceIn(0f, 1f) * 1000).toInt()) }
+    var homeY: Float
+        get() = settings.getInt("home_y_permille", 600) / 1000f
+        set(value) = settings.edit { putInt("home_y_permille", (value.coerceIn(0f, 1f) * 1000).toInt()) }
+
     // ---- 약속 시간표 (최대 3칸) ----
 
     fun scheduleSlots(): List<ScheduleSlot> =

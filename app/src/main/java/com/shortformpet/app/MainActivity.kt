@@ -77,6 +77,8 @@ class MainActivity : Activity() {
     private lateinit var expNote: TextView
     private lateinit var feedButton: TextView
     private lateinit var snackButton: TextView
+    /** 지금 던지는 것이 간식인지(false면 밥) */
+    private var aimSnack = false
 
     // 오늘·할 일
     private lateinit var dateText: TextView
@@ -335,8 +337,8 @@ class MainActivity : Activity() {
         val frame = android.widget.FrameLayout(this)
         world = PetWorldView(this).apply {
             onPetTapped = { onPetTapped() }
-            onFoodCaught = { onFoodCaught() }
-            onFoodMissed = { say(Lines.FEED_MISS, 2_000) }
+            onFoodCaught = { inAir -> onFoodCaught(inAir) }
+            onFoodDropped = { say(Lines.FEED_DROP, 2_000) }
         }
         frame.addView(world, android.widget.FrameLayout.LayoutParams(MATCH, MATCH))
 
@@ -409,13 +411,12 @@ class MainActivity : Activity() {
         petHint = label("", 12f, P.SUB)
         dock.addView(petHint, lp(MATCH, WRAP).apply { bottomMargin = 8.dp })
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        feedButton = btn(Lines.THROW, BtnStyle.PRIMARY) { setAiming(!world.aiming) }
+        // 같은 버튼을 다시 누르면 그만 던지기, 다른 버튼을 누르면 밥 ↔ 간식으로 바꿉니다.
+        feedButton = btn(Lines.THROW, BtnStyle.PRIMARY) {
+            if (world.aiming && !aimSnack) setAiming(false) else setAiming(true, snack = false)
+        }
         snackButton = btn(Lines.SNACK_EMPTY, BtnStyle.OUTLINE) {
-            val reply = pet.giveSnack()
-            world.say(reply)
-            world.react()
-            if (reply != Lines.SNACK_NONE && reply != Lines.SNACK_EGG) world.floatText("+${PetEngine.SNACK_H}")
-            refresh()
+            if (world.aiming && aimSnack) setAiming(false) else setAiming(true, snack = true)
         }
         buttons.addView(feedButton, LinearLayout.LayoutParams(0, 48.dp, 1f).apply { marginEnd = 8.dp })
         buttons.addView(snackButton, LinearLayout.LayoutParams(0, 48.dp, 1f))
@@ -433,11 +434,16 @@ class MainActivity : Activity() {
         return frame
     }
 
-    private fun setAiming(on: Boolean) {
-        if (on && !canFeed()) return
+    /** 던지기 모드 켜기/끄기. snack = true면 밥 대신 간식을 던집니다. */
+    private fun setAiming(on: Boolean, snack: Boolean = false) {
+        if (on && !(if (snack) canSnack() else canFeed())) return
+        // 밥 ↔ 간식을 바꿀 때는 들고 있던 것을 내려놓고 다시 집습니다.
+        if (on && world.aiming) world.aiming = false
+        aimSnack = on && snack
+        world.snack = aimSnack
         world.aiming = on
         pager.locked = on
-        if (on) world.say(Lines.FEED_AIM, 3_000)
+        if (on) world.say(if (snack) Lines.SNACK_AIM else Lines.FEED_AIM, 3_000)
         refresh()
     }
 
@@ -446,10 +452,27 @@ class MainActivity : Activity() {
         return !s.isEgg && !s.fedToday
     }
 
-    private fun onFoodCaught() {
+    private fun canSnack(): Boolean {
+        val s = pet.state()
+        return !s.isEgg && s.snacksAvailable > 0
+    }
+
+    /** inAir = 날아오는 밥(간식)을 입으로 정확히 받아먹음, false = 바닥에 떨어진 것을 주워 먹음 */
+    private fun onFoodCaught(inAir: Boolean) {
         val before = pet.state().happiness
-        val reply = pet.feed()
-        world.say(reply)
+        val reply: String
+        val fed: Boolean
+        val catchLine: String
+        if (aimSnack) {
+            reply = pet.giveSnack()
+            fed = reply != Lines.SNACK_NONE && reply != Lines.SNACK_EGG
+            catchLine = Lines.snackCatch()
+        } else {
+            reply = pet.feed()
+            fed = reply != Lines.FEED_ALREADY && reply != Lines.FEED_EGG
+            catchLine = Lines.feedCatch()
+        }
+        world.say(if (inAir && fed) catchLine else reply)
         val gain = pet.state().happiness - before
         if (gain > 0) world.floatText("+$gain")
         setAiming(false)
@@ -728,7 +751,14 @@ class MainActivity : Activity() {
         toggles.addView(divider(), lp(MATCH, 1.dp))
         toggles.addView(switchRow("빼꼼 모찌", "숏폼을 오래 볼 때 화면 끝에서 모찌가 시간을 알려 줘요", repo.peekEnabled) { repo.peekEnabled = it })
         toggles.addView(divider(), lp(MATCH, 1.dp))
-        toggles.addView(switchRow("홈 화면 산책", "홈 화면에서도 빼꼼 모찌가 보여요", repo.homeWalkEnabled) { repo.homeWalkEnabled = it })
+        toggles.addView(switchRow("홈 화면 산책", "홈 화면을 모찌가 돌아다녀요 · 화면 끝으로 끌어 두면 눈만 빼꼼 내밀어요", repo.homeWalkEnabled) {
+            repo.homeWalkEnabled = it
+            // 산책 모찌는 접근성 서비스 안에서 덕니다. 꺼져 있으면 바로 켜러 갑니다.
+            if (it && !isAccessibilityEnabled()) {
+                Toast.makeText(this@MainActivity, Lines.HOME_WALK_NEED_ACC, Toast.LENGTH_LONG).show()
+                openAccessibility()
+            }
+        })
         toggles.addView(divider(), lp(MATCH, 1.dp))
         toggles.addView(switchRow("연속일수 화면", "하루 처음 열 때 연속일수를 크게 보여줘요", repo.streakScreenEnabled) { repo.streakScreenEnabled = it })
         toggles.addView(divider(), lp(MATCH, 1.dp))
@@ -1072,7 +1102,7 @@ class MainActivity : Activity() {
         sceneIcon.kind = if (state.scene == 0) LineIcon.Kind.FIELD else LineIcon.Kind.HOUSE
         (sceneIcon.parent as View).contentDescription = if (state.scene == 0) "들판으로 나가기" else "방 안으로 들어가기"
         world.setPet(state)
-        world.idleText = if (world.aiming) Lines.FEED_AIM else Lines.idle(state.mood, state.stage, focusing = sessionOn)
+        world.idleText = if (world.aiming) (if (aimSnack) Lines.SNACK_AIM else Lines.FEED_AIM) else Lines.idle(state.mood, state.stage, focusing = sessionOn)
         val uptime = SystemClock.uptimeMillis()
         if (state.isEgg) {
             hpText.text = Lines.HATCHING
@@ -1089,16 +1119,20 @@ class MainActivity : Activity() {
         expBar.progress = (state.expProgress * 1000).toInt()
         petHint.text = if (state.isEgg) Lines.NOTE_EGG else Lines.petHint(state.petsLeft)
         feedButton.text = when {
-            world.aiming -> Lines.THROW_CANCEL
+            world.aiming && !aimSnack -> Lines.THROW_CANCEL
             state.fedToday -> Lines.THROW_DONE
             else -> Lines.THROW
         }
-        setUsable(feedButton, world.aiming || (!state.fedToday && !state.isEgg))
+        setUsable(feedButton, (world.aiming && !aimSnack) || (!state.fedToday && !state.isEgg))
         val snacks = state.snacksAvailable
-        snackButton.text = if (snacks > 0) Lines.snack(snacks) else Lines.SNACK_EMPTY
-        setUsable(snackButton, snacks > 0 && !state.isEgg)
+        snackButton.text = when {
+            world.aiming && aimSnack -> Lines.THROW_CANCEL
+            snacks > 0 -> Lines.snack(snacks)
+            else -> Lines.SNACK_EMPTY
+        }
+        setUsable(snackButton, (world.aiming && aimSnack) || (snacks > 0 && !state.isEgg))
         val notes = when {
-            world.aiming -> listOf(Lines.NOTE_AIM)
+            world.aiming -> listOf(if (aimSnack) Lines.NOTE_AIM_SNACK else Lines.NOTE_AIM)
             state.isEgg -> emptyList()
             else -> listOfNotNull(
                 if (state.fedToday) Lines.NOTE_FED else null,

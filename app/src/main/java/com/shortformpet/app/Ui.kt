@@ -69,7 +69,13 @@ object P {
     /** 모찌 탭 배경: 방 안 */
     val ROOM_WALL = Color.rgb(237, 241, 232)
     val ROOM_FLOOR = Color.rgb(226, 222, 201)
-    val CUSHION = Color.rgb(216, 228, 206)
+    /** 고양이 방석(침대): 갈색 바깥 · 밝은 갈색 안쪽 · 진한 갈색 테두리 */
+    val CUSHION = Color.rgb(170, 120, 84)
+    val CUSHION_IN = Color.rgb(204, 160, 120)
+    val CUSHION_LINE = Color.rgb(124, 86, 58)
+    /** 방 러그: 희미한 붉은색 */
+    val RUG = Color.rgb(231, 211, 200)
+    val RUG_LINE = Color.rgb(225, 200, 190)
     /** 모찌 탭 배경: 들판 */
     val FIELD_SKY = Color.rgb(235, 241, 236)
     val FIELD_GRASS = Color.rgb(220, 231, 208)

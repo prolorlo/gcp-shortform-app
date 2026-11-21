@@ -36,6 +36,9 @@ class PetView(context: Context) : View(context) {
         set(value) { if (painter.sleepy != value) { painter.sleepy = value; invalidate() } }
     /** 그림자를 그릴지 (빼꼼 모찌는 끔) */
     var shadow: Boolean = true
+    /** 시선 -1(왼쪽) ~ 1(오른쪽). 빼꼼 모찌는 화면 안쪽(왼쪽)을 봅니다. */
+    var look: Float = 0f
+        set(value) { field = value; invalidate() }
 
     fun setState(state: PetState) {
         stage = state.stage
@@ -85,6 +88,7 @@ class PetView(context: Context) : View(context) {
         pose.jump = if (petElapsed in 0f..0.6f) sin(petElapsed / 0.6f * PI.toFloat()) * maxR * 0.35f else 0f
         pose.blink = phase > 0.94f
         pose.shadow = shadow
+        pose.look = look
         painter.draw(canvas, cx, ground, maxR, pose)
         if (petElapsed in 0f..1.4f) {
             val alpha = ((1f - petElapsed / 1.4f) * 255).toInt().coerceIn(0, 255)

@@ -115,15 +115,30 @@ object Lines {
         }.random()
     }
 
+    // 잡아서 들기 · 던지기
+    fun held(mood: Mood) = when (mood) {
+        Mood.SULKY, Mood.SICK -> listOf("살살 들어 줘", "지금은 좀 쉬고 싶어").random()
+        else -> listOf("어, 나 들렸다", "와 높다", "어디 가는 거야?").random()
+    }
+    fun landed(mood: Mood, bounces: Int) = when {
+        mood == Mood.SICK || mood == Mood.SULKY -> listOf("어지러워", "살살 해 줘").random()
+        bounces >= 3 -> listOf("빙글빙글 어지러워", "방을 한 바퀴 돌았네", "눈이 핑핑 돌아").random()
+        bounces >= 1 -> listOf("우와 날았다", "한 번 더 해 줘", "통통 튀었다").random()
+        else -> listOf("착지 성공", "사뿐히 내려왔어").random()
+    }
+
     fun feedOk() = listOf("맛있다", "잘 먹을게", "냠, 든든하다").random()
     const val FEED_ALREADY = "아까 먹었어. 내일 또 줘"
     const val FEED_EGG = "알에서 나오면 먹을게"
-    const val FEED_MISS = "아깝다. 다시 던져 줘"
+    const val FEED_DROP = "앗, 떨어졌다! 주워 먹을게"
+    fun feedCatch() = listOf("앙! 받았다", "냠! 한 입에 쏙", "나이스 캐치! 맛있다").random()
     const val FEED_AIM = "위로 밀어서 던져 줘"
 
     fun snackOk() = listOf("간식이다", "달다", "이거 좋아해").random()
     const val SNACK_NONE = "간식이 없어. 할 일 하나 끝내면 생겨"
     const val SNACK_EGG = "알에서 나오면 먹을게"
+    const val SNACK_AIM = "간식도 위로 밀어서 던져 줘"
+    fun snackCatch() = listOf("앙! 간식 받았다", "냠! 달콤해", "간식 캐치!").random()
 
     fun todoDone(todo: String) = "'$todo' 끝냈네. 간식 하나 생겼어"
 
@@ -238,6 +253,12 @@ object Lines {
     fun peekCoupon(clock: String) = "쿠폰 $clock"
     val PEEK_PRAISE = listOf("스스로 껐네. 멋있다", "딱 좋을 때 멈췄어", "오, 잘 끊었다")
     val PEEK_HOME = listOf("나 여기 있어", "산책 중", "오늘도 같이 가자")
+    /** 홈 화면을 돌아다니며 가끔 하는 말 */
+    val HOME_CHAT = listOf("산책 좋다", "어디 갈까?", "오늘 할 일 했어?", "폰은 조금만 보자", "흥얼흥얼", "같이 걷자")
+    val HOME_TAP = listOf("헤헤", "불렀어?", "나 여기 있어", "간지러워")
+    const val HOME_HELD = "어어, 들렸다!"
+    const val HOME_HIDE = "여기서 살짝 지켜볼게"
+    const val HOME_OUT = "다시 산책!"
 
     // ================================================================== G. 집중 중 고정 알림
 
@@ -273,8 +294,9 @@ object Lines {
     fun expToday(gain: Int) = "오늘 예상 +$gain"
     fun streakChip(days: Int) = "연속 ${days}일"
 
-    const val THROW = "밥 던지기"
-    const val THROW_CANCEL = "그만 던지기"
+    const val THROW = "밥 주기"
+    const val THROW_CANCEL = "취소"
+    const val HOME_WALK_NEED_ACC = "홈 화면 산책은 접근성 서비스가 켜져 있어야 보여요. 접근성 설정에서 숏폼펫을 켜 주세요"
     const val THROW_DONE = "밥 먹었어요"
     fun snack(count: Int) = "간식 주기 · $count"
     const val SNACK_EMPTY = "간식 없음"
@@ -282,7 +304,8 @@ object Lines {
     const val NOTE_FED = "오늘 밥은 이미 줬어요 · 내일 오전 5시에 초기화돼요"
     const val NOTE_EGG = "알에서 나오면 밥과 간식을 줄 수 있어요"
     const val NOTE_NO_SNACK = "할 일을 끝내면 간식이 생겨요"
-    const val NOTE_AIM = "먹이를 위로 밀어 던져요 · 모찌에게 닿으면 행복 +20"
+    const val NOTE_AIM = "먹이를 위로 밀어 던져요 · 받아먹거나 주워 먹으면 행복 +20"
+    const val NOTE_AIM_SNACK = "간식을 위로 밀어 던져요 · 받아먹거나 주워 먹으면 행복 +15"
     fun petHint(left: Int) = if (left > 0) "모찌를 눌러 쓰다듬기 · 지금 시간대 행복 +5가 ${left}번 남았어요" else "쓰다듬기 행복 보너스는 다음 시간대에 다시 생겨요"
     const val SCENE_ROOM = "방 안"
     const val SCENE_FIELD = "들판"
